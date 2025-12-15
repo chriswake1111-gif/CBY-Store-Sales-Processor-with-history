@@ -98,7 +98,8 @@ export const exportToExcel = async (processedData: ProcessedData, defaultFilenam
             const newRow = sheet.getRow(rowNumber);
             newRow.values = row.values;
             newRow.height = row.height;
-            newRow.style = row.style;
+            // TS Fix: Cast to any because 'style' property might be missing in type definition but exists at runtime
+            (newRow as any).style = (row as any).style;
             
             row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
                 const newCell = newRow.getCell(colNumber);
