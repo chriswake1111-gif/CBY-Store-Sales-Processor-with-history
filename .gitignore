@@ -121,3 +121,16 @@ dist
 dist/
 dist-ssr/
 *.local
+
+# --- SECURITY: PREVENT DATA LEAKAGE ---
+# Ignore all potential data files anywhere in the project
+*.xlsx
+*.xls
+*.csv
+*.json
+!package.json
+!tsconfig.json
+!vercel.json
+!metadata.json
+!manifest.json
+!public/manifest.json
