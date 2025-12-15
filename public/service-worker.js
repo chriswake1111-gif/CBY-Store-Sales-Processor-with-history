@@ -1,6 +1,6 @@
 
-// Service Worker for PWA with Cache-First Strategy
-const CACHE_NAME = 'sales-processor-v0.941';
+// Service Worker for PWA with Network-First Strategy for HTML
+const CACHE_NAME = 'sales-processor-v0.99'; // Bump version to force update
 const urlsToCache = [
   '/',
   '/index.html',
@@ -17,8 +17,6 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME)
       .then((cache) => {
         console.log('Opened cache');
-        // If one file fails, we log it but don't break the whole install (optional robustness)
-        // But for PWA, we typically want all core assets.
         return cache.addAll(urlsToCache).catch(err => {
             console.error('Failed to cache resources:', err);
         });
@@ -46,14 +44,26 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        // Cache hit - return response
-        if (response) {
-          return response;
-        }
-        return fetch(event.request);
-      })
-  );
+  // Strategy: Network First for HTML (navigation), Cache First for assets
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          return caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, response.clone());
+            return response;
+          });
+        })
+        .catch(() => {
+          return caches.match(event.request);
+        })
+    );
+  } else {
+    event.respondWith(
+      caches.match(event.request)
+        .then((response) => {
+          return response || fetch(event.request);
+        })
+    );
+  }
 });
