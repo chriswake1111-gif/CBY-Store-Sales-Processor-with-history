@@ -1,0 +1,6 @@
+{
+  "name": "CBY Store Sales Processor with history",
+  "version": "0.95",
+  "description": "A PWA for processing store sales reports into Points, Cash Rewards, and Cosmetic Analysis tables with local data handling.",
+  "requestFramePermissions": []
+}

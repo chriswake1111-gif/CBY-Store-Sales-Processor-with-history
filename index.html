@@ -1,0 +1,45 @@
+
+<!DOCTYPE html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="apple-touch-icon" href="/vite.svg" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="white">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>分店獎金計算系統</title>
+    <link rel="manifest" href="/manifest.json">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+      body { font-family: 'Noto Sans TC', sans-serif; }
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: #f1f1f1; }
+      ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^18.3.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^18.3.1/",
+    "react/": "https://aistudiocdn.com/react@^18.3.1/",
+    "xlsx": "https://aistudiocdn.com/xlsx@^0.18.5",
+    "uuid": "https://aistudiocdn.com/uuid@^9.0.1",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.344.0",
+    "react-dom": "https://aistudiocdn.com/react-dom@^18.3.1",
+    "vite": "https://aistudiocdn.com/vite@^5.1.6",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^4.2.1",
+    "dexie": "https://aistudiocdn.com/dexie@^3.2.4",
+    "exceljs": "https://aistudiocdn.com/exceljs@^4.4.0"
+  }
+}
+</script>
+</head>
+  <body class="bg-gray-50 text-gray-900 h-screen overflow-hidden">
+    <div id="root" class="h-full"></div>
+    <script type="module" src="./index.tsx"></script>
+  </body>
+</html>
