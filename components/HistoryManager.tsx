@@ -115,11 +115,14 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
         if (cid && itemID && cid !== 'undefined' && itemID !== 'undefined') {
           // Parse Quantity
           const qty = Number(row[COL_HEADERS.QUANTITY]) || 0;
+          
+          // Fix: Use Sales Date if available, otherwise fallback to Ticket No ('單號')
+          const dateStr = String(row[COL_HEADERS.SALES_DATE] || row[COL_HEADERS.TICKET_NO] || '').trim();
 
           buffer.push({
             customerID: cid,
             itemID: itemID,
-            date: String(row[COL_HEADERS.SALES_DATE] || ''),
+            date: dateStr,
             quantity: qty,
             storeName: storeName
           });
