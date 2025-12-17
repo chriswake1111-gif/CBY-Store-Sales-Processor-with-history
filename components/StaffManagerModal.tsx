@@ -19,7 +19,7 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
     if (!e.target.files || !e.target.files[0]) return;
     try {
       const json = await readExcelFile(e.target.files[0]);
-      // Expect columns: 員工編號(optional), 員工姓名, 職位(門市/藥師/無獎金)
+      // Expect columns: 員工編號(optional), 員工姓名, 職位(門市/藥師/無獎金), 分店, 點數標準, 美妝標準
       const newStaff: StaffRecord[] = [];
       const currentIds = new Set(localList.map(s => s.name)); // Using Name as unique key primarily
 
@@ -35,12 +35,19 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
          // Use existing ID if available, otherwise generated one or from file
          const id = String(row['員工編號'] || row['ID'] || Date.now() + Math.random().toString().slice(2,6)).trim();
 
-         // If exists, update role, else push
-         const existingIdx = localList.findIndex(s => s.name === name);
-         if (existingIdx >= 0) {
-             // Optional: Update existing? Let's skip valid existing to avoid overwrite unless explicit
-         } else if (!currentIds.has(name)) {
-             newStaff.push({ id, name, role });
+         // New Fields
+         const branch = String(row['分店'] || row['Branch'] || row['Store'] || '').trim();
+         const pointsStd = Number(row['點數標準'] || row['Points Std'] || 0);
+         const cosmeticStd = Number(row['美妝標準'] || row['Cosmetic Std'] || 0);
+
+         // If exists, skip (or logic to update could go here, but prompt implies adding)
+         if (!currentIds.has(name)) {
+             newStaff.push({ 
+                 id, name, role, 
+                 branch: branch || undefined, 
+                 pointsStandard: pointsStd || undefined,
+                 cosmeticStandard: cosmeticStd || undefined
+             });
              currentIds.add(name);
          }
       });
@@ -57,7 +64,7 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
     setLocalList(prev => [{ id: '', name: '', role: 'SALES' }, ...prev]);
   };
 
-  const updateRow = (idx: number, field: keyof StaffRecord, value: string) => {
+  const updateRow = (idx: number, field: keyof StaffRecord, value: any) => {
     setLocalList(prev => {
        const next = [...prev];
        next[idx] = { ...next[idx], [field]: value };
@@ -73,7 +80,7 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="bg-slate-800 text-white px-6 py-4 flex justify-between items-center shrink-0">
           <h3 className="text-lg font-bold flex items-center gap-2"><UserCog size={20}/> 員工職位設定表</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={24}/></button>
@@ -104,9 +111,12 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
                 <table className="w-full text-sm text-left">
                     <thead className="bg-slate-100 text-slate-700 font-bold uppercase border-b border-gray-200">
                         <tr>
-                            <th className="px-4 py-3 w-32">員工編號</th>
-                            <th className="px-4 py-3">員工姓名</th>
-                            <th className="px-4 py-3 w-40">職位</th>
+                            <th className="px-4 py-3 w-24">員工編號</th>
+                            <th className="px-4 py-3 w-32">員工姓名</th>
+                            <th className="px-4 py-3 w-32">職位</th>
+                            <th className="px-4 py-3 w-32">分店</th>
+                            <th className="px-4 py-3 w-24 text-right">點數標準</th>
+                            <th className="px-4 py-3 w-24 text-right">美妝標準</th>
                             <th className="px-4 py-3 w-16 text-center">刪除</th>
                         </tr>
                     </thead>
@@ -133,6 +143,18 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
                                         <option value="NO_BONUS">無獎金</option>
                                     </select>
                                 </td>
+                                <td className="px-4 py-2">
+                                     <input type="text" value={staff.branch || ''} onChange={e => updateRow(idx, 'branch', e.target.value)} 
+                                        className="w-full bg-transparent border-b border-transparent focus:border-blue-500 focus:outline-none py-1 text-slate-600" placeholder="分店" />
+                                </td>
+                                <td className="px-4 py-2">
+                                     <input type="number" value={staff.pointsStandard || ''} onChange={e => updateRow(idx, 'pointsStandard', Number(e.target.value))} 
+                                        className="w-full bg-transparent border-b border-transparent focus:border-blue-500 focus:outline-none py-1 text-right font-mono" placeholder="-" />
+                                </td>
+                                <td className="px-4 py-2">
+                                     <input type="number" value={staff.cosmeticStandard || ''} onChange={e => updateRow(idx, 'cosmeticStandard', Number(e.target.value))} 
+                                        className="w-full bg-transparent border-b border-transparent focus:border-blue-500 focus:outline-none py-1 text-right font-mono" placeholder="-" />
+                                </td>
                                 <td className="px-4 py-2 text-center">
                                     <button onClick={() => removeRow(idx)} className="text-gray-300 hover:text-red-500 transition-colors">
                                         <Trash2 size={16} />
@@ -141,7 +163,7 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
                             </tr>
                         ))}
                         {filteredList.length === 0 && (
-                            <tr><td colSpan={4} className="p-8 text-center text-gray-400">無符合資料</td></tr>
+                            <tr><td colSpan={7} className="p-8 text-center text-gray-400">無符合資料</td></tr>
                         )}
                     </tbody>
                 </table>

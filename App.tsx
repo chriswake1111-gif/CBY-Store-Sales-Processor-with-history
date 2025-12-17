@@ -4,6 +4,7 @@ import { RawRow, ExclusionItem, RewardRule, ProcessedData, Stage1Status, StaffRo
 import { readExcelFile, exportToExcel } from './utils/excelHelper';
 import { processStage1, processStage2, processStage3, recalculateStage1Points, generateEmptyStage3Rows } from './utils/processor';
 import { saveToLocal, loadFromLocal, checkSavedData } from './utils/storage';
+import { seedDefaultStores } from './utils/db'; // Import seed function
 import FileUploader from './components/FileUploader';
 import PopoutWindow from './components/PopoutWindow';
 import DataViewer from './components/DataViewer';
@@ -11,8 +12,8 @@ import StaffClassificationModal from './components/StaffClassificationModal';
 import HelpModal from './components/HelpModal';
 import HistoryManager from './components/HistoryManager';
 import ExportSettingsModal from './components/ExportSettingsModal';
-import RepurchaseSettingsModal from './components/RepurchaseSettingsModal'; // New
-import StaffManagerModal from './components/StaffManagerModal'; // New
+import RepurchaseSettingsModal from './components/RepurchaseSettingsModal'; 
+import StaffManagerModal from './components/StaffManagerModal'; 
 import { Download, Maximize2, AlertCircle, MonitorDown, Save, FolderOpen, Activity, FileSpreadsheet, HelpCircle, Database, Loader2, Settings, Users, ClipboardList } from 'lucide-react';
 import { COL_HEADERS } from './constants';
 import { v4 as uuidv4 } from 'uuid';
@@ -70,8 +71,8 @@ const App: React.FC = () => {
   const [showHelp, setShowHelp] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showExportSettings, setShowExportSettings] = useState(false);
-  const [showRepurchaseSettings, setShowRepurchaseSettings] = useState(false); // New
-  const [showStaffManager, setShowStaffManager] = useState(false); // New
+  const [showRepurchaseSettings, setShowRepurchaseSettings] = useState(false); 
+  const [showStaffManager, setShowStaffManager] = useState(false); 
 
   const [lastSaveTime, setLastSaveTime] = useState<number | null>(null);
   const [hasSavedData, setHasSavedData] = useState<boolean>(false);
@@ -83,6 +84,9 @@ const App: React.FC = () => {
   const stateRef = useRef({ exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList });
 
   useEffect(() => {
+    // Seed DB
+    seedDefaultStores();
+    
     const ts = checkSavedData();
     if (ts) { setHasSavedData(true); setLastSaveTime(ts); }
     // Initial Load of global configs if any
@@ -189,10 +193,6 @@ const App: React.FC = () => {
       setStaffRoles(newRoles);
 
       if (unknownPeople.length > 0) {
-        // Show modal only for unknowns (filtering inside modal logic via props if needed, but here simpler to just pass full list or handle inside)
-        // Ideally we pass just unknowns or let user see all? 
-        // Current Modal takes 'names' prop. We should pass only unknowns to focus user attention, OR pass all but pre-fill knowns.
-        // Let's pass ALL people found in file, but 'initialRoles' will cover knowns.
         setIsClassifying(true);
       } else {
         // All known, proceed directly
@@ -306,7 +306,6 @@ const App: React.FC = () => {
     }));
   };
   
-  // New Action 2 Handler
   const handleUpdateStage1Action2 = (id: string, field: 'originalDeveloper' | 'repurchaseType', val: string) => {
       if (!activePerson) return;
       setPersonData(activePerson, (data) => ({
@@ -348,7 +347,6 @@ const App: React.FC = () => {
     });
   }, [processedData]);
 
-  // Derive all active staff for the dropdown list
   const allActiveStaff = useMemo(() => {
      return Object.keys(processedData).filter(p => processedData[p].role !== 'NO_BONUS').sort();
   }, [processedData]);
@@ -368,7 +366,6 @@ const App: React.FC = () => {
     sortedPeople, selectedPersons, togglePersonSelection: (p: string, e: any) => { e.stopPropagation(); const s = new Set(selectedPersons); s.has(p) ? s.delete(p) : s.add(p); setSelectedPersons(s); },
     activePerson, setActivePerson, currentData, activeTab, setActiveTab, stage1TotalPoints,
     handleStatusChangeStage1, handleToggleDeleteStage2, handleUpdateStage2CustomReward, onClose: isPopOut ? () => setIsPopOut(false) : undefined,
-    // New props
     handleUpdateStage1Action2,
     repurchaseOptions,
     allActiveStaff
@@ -402,15 +399,13 @@ const App: React.FC = () => {
                     <Database size={18} />
                   </button>
                 </h1>
-                {/* Info and Version */}
                 <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v0.97</span>
+                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v0.98</span>
                     {lastSaveTime && <span className="flex items-center gap-1 border-l border-slate-700 pl-2"><Save size={10}/> {new Date(lastSaveTime).toLocaleTimeString()}</span>}
                 </div>
              </div>
           </div>
           <div className="flex gap-2">
-             {/* New Settings Buttons */}
              <button onClick={() => setShowRepurchaseSettings(true)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-purple-200 bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:text-white transition-colors font-medium rounded-sm">
                 <ClipboardList size={14}/> 回購狀態表
              </button>
@@ -489,7 +484,6 @@ const App: React.FC = () => {
       
       {isPopOut && <PopoutWindow title="結果預覽" onClose={() => setIsPopOut(false)}><DataViewer {...dvProps} /></PopoutWindow>}
       
-      {/* Classification Modal only shows if there are UNKNOWN people */}
       {isClassifying && (
         <StaffClassificationModal 
             names={classificationNames} 
@@ -503,7 +497,6 @@ const App: React.FC = () => {
       {showHistory && <HistoryManager onClose={() => setShowHistory(false)} />}
       {showExportSettings && <ExportSettingsModal onClose={() => setShowExportSettings(false)} />}
       
-      {/* New Settings Modals */}
       {showRepurchaseSettings && <RepurchaseSettingsModal options={repurchaseOptions} onSave={(opts) => { setRepurchaseOptions(opts); setShowRepurchaseSettings(false); }} onClose={() => setShowRepurchaseSettings(false)} />}
       {showStaffManager && <StaffManagerModal staffList={staffMasterList} onSave={(list) => { setStaffMasterList(list); setShowStaffManager(false); }} onClose={() => setShowStaffManager(false)} />}
     </>

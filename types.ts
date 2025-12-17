@@ -53,4 +53,13 @@ export interface StaffRecord {
   id: string; // Employee ID if available, otherwise UUID or Name
   name: string;
   role: StaffRole;
+  branch?: string; // New: Branch Name
+  pointsStandard?: number; // New: Points Target
+  cosmeticStandard?: number; // New: Cosmetic Target
+}
+
+export interface StoreRecord {
+  id?: number;
+  name: string;
+  isActive: boolean;
 }

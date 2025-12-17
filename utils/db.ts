@@ -1,5 +1,6 @@
 
 import Dexie, { Table } from 'dexie';
+import { StoreRecord } from '../types';
 
 export interface HistoryRecord {
   id?: number;
@@ -36,14 +37,14 @@ export interface TemplateRecord {
 export const db = new Dexie('SalesHistoryDB') as Dexie & {
   history: Table<HistoryRecord>;
   templates: Table<TemplateRecord>;
+  stores: Table<StoreRecord>;
 };
 
-// Update version to 3 to include storeName in index
-// Note: We don't strictly need to index 'quantity', so version remains compatible or bumps if needed for other reasons.
-// Dexie handles non-indexed fields automatically.
-db.version(3).stores({
+// Update version to 4 to include stores table
+db.version(4).stores({
   history: '++id, [customerID+itemID], customerID, itemID, storeName',
-  templates: '++id, name, updatedAt'
+  templates: '++id, name, updatedAt',
+  stores: '++id, &name' // Unique name
 });
 
 /**
@@ -89,6 +90,32 @@ export const getHistoryCount = async () => {
 };
 
 // --- Store Management Methods ---
+
+const DEFAULT_STORES = ["東勢店", "新社店", "卓蘭店", "北苗店", "巨蛋店", "後龍店", "沙鹿店", "清水店"];
+
+export const seedDefaultStores = async () => {
+  const count = await db.stores.count();
+  if (count === 0) {
+    await db.stores.bulkAdd(DEFAULT_STORES.map(name => ({ name, isActive: true })));
+    console.log("Default stores seeded");
+  }
+};
+
+export const getStores = async (): Promise<StoreRecord[]> => {
+  return await db.stores.toArray();
+};
+
+export const addStore = async (name: string) => {
+  await db.stores.add({ name, isActive: true });
+};
+
+export const updateStore = async (id: number, name: string) => {
+  await db.stores.update(id, { name });
+};
+
+export const deleteStore = async (id: number) => {
+  await db.stores.delete(id);
+};
 
 export const getHistoryStatsByStore = async (): Promise<{ storeName: string; count: number }[]> => {
   const all = await db.history.toArray();

@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
-import { Database, Trash2, Upload, AlertTriangle, HardDrive, RefreshCw, X, Store, PieChart, CheckCircle2 } from 'lucide-react';
-import { getHistoryCount, clearHistory, bulkAddHistory, HistoryRecord, getHistoryStatsByStore, deleteStoreHistory } from '../utils/db';
+import { Database, Trash2, Upload, AlertTriangle, HardDrive, RefreshCw, X, Store, PieChart, CheckCircle2, Settings, Plus, Save, Edit2 } from 'lucide-react';
+import { getHistoryCount, clearHistory, bulkAddHistory, HistoryRecord, getHistoryStatsByStore, deleteStoreHistory, getStores, addStore, updateStore, deleteStore } from '../utils/db';
 import { readExcelFile } from '../utils/excelHelper';
 import { COL_HEADERS } from '../constants';
+import { StoreRecord } from '../types';
 
 interface HistoryManagerProps {
   onClose: () => void;
@@ -11,12 +12,10 @@ interface HistoryManagerProps {
 
 const CHUNK_SIZE = 2000; 
 
-// Common store names to help user (can be customized)
-const SUGGESTED_STORES = ["台北總店", "台中分店", "高雄分店", "網路商店", "其他"];
-
 const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
   const [totalCount, setTotalCount] = useState<number>(0);
   const [storeStats, setStoreStats] = useState<{ storeName: string; count: number }[]>([]);
+  const [availableStores, setAvailableStores] = useState<StoreRecord[]>([]);
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -27,8 +26,14 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
   // Import Config
   const [targetStore, setTargetStore] = useState('');
 
+  // Store Management State
+  const [showStoreManage, setShowStoreManage] = useState(false);
+  const [newStoreName, setNewStoreName] = useState('');
+  const [editingStore, setEditingStore] = useState<{id: number, name: string} | null>(null);
+
   useEffect(() => {
     refreshStats();
+    loadStores();
   }, []);
 
   const refreshStats = async () => {
@@ -42,6 +47,11 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
     }
   };
 
+  const loadStores = async () => {
+    const stores = await getStores();
+    setAvailableStores(stores);
+  };
+
   const handleClearAll = async () => {
     if (!window.confirm("嚴重警告：確定要清空「所有分店」的歷史資料嗎？\n此動作無法復原。")) return;
     await clearHistory();
@@ -50,7 +60,7 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
     setMessageType('success');
   };
 
-  const handleDeleteStore = async (storeName: string) => {
+  const handleDeleteStoreHistory = async (storeName: string) => {
     if (!window.confirm(`確定要移除「${storeName}」的所有歷史資料嗎？`)) return;
     setIsProcessing(true);
     try {
@@ -65,16 +75,46 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
     }
   };
 
+  // --- Store Management Handlers ---
+
+  const handleAddStore = async () => {
+    if (!newStoreName.trim()) return;
+    try {
+      await addStore(newStoreName.trim());
+      setNewStoreName('');
+      await loadStores();
+    } catch (e) {
+      alert("新增分店失敗，名稱可能重複");
+    }
+  };
+
+  const handleUpdateStore = async () => {
+    if (!editingStore || !editingStore.name.trim()) return;
+    try {
+      await updateStore(editingStore.id, editingStore.name.trim());
+      setEditingStore(null);
+      await loadStores();
+    } catch (e) {
+      alert("更新失敗");
+    }
+  };
+
+  const handleDeleteStoreRecord = async (id: number, name: string) => {
+    if(!window.confirm(`確定要從「分店清單」中移除 ${name} 嗎？\n注意：這不會刪除該分店已匯入的歷史銷售資料。`)) return;
+    await deleteStore(id);
+    await loadStores();
+  };
+
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files[0]) {
           const file = e.target.files[0];
           // Auto-detect store name from filename if possible
           const name = file.name;
-          const found = SUGGESTED_STORES.find(s => name.includes(s));
+          const found = availableStores.find(s => name.includes(s.name));
           if (found) {
-              setTargetStore(found);
+              setTargetStore(found.name);
           } else {
-              // Try to be smart? Or just leave it blank/default
               if (!targetStore) setTargetStore("未命名分店");
           }
           
@@ -202,9 +242,64 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
 
             {/* Import Section */}
             <div className="bg-white rounded-lg border border-blue-200 shadow-sm p-5 mb-6">
-                <h4 className="font-bold text-slate-800 flex items-center gap-2 mb-4">
-                    <Upload size={18} className="text-blue-500"/> 匯入新資料
-                </h4>
+                <div className="flex justify-between items-center mb-4">
+                     <h4 className="font-bold text-slate-800 flex items-center gap-2">
+                        <Upload size={18} className="text-blue-500"/> 匯入新資料
+                    </h4>
+                    <button 
+                        onClick={() => setShowStoreManage(!showStoreManage)}
+                        className="text-xs flex items-center gap-1 px-2 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                    >
+                        <Settings size={12}/> {showStoreManage ? '隱藏管理' : '管理分店名單'}
+                    </button>
+                </div>
+               
+                {/* Store Management UI */}
+                {showStoreManage && (
+                    <div className="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-lg animate-in slide-in-from-top-2">
+                        <h5 className="text-xs font-bold text-slate-600 mb-3 flex items-center gap-1"><Store size={14}/> 編輯分店清單</h5>
+                        
+                        {/* Add New */}
+                        <div className="flex gap-2 mb-3">
+                            <input 
+                                type="text" 
+                                placeholder="新增分店名稱..." 
+                                value={newStoreName}
+                                onChange={e => setNewStoreName(e.target.value)}
+                                className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-300 outline-none"
+                            />
+                            <button onClick={handleAddStore} className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded hover:bg-blue-700 flex items-center gap-1">
+                                <Plus size={14}/> 新增
+                            </button>
+                        </div>
+
+                        {/* List */}
+                        <div className="flex flex-wrap gap-2">
+                            {availableStores.map(store => (
+                                <div key={store.id} className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-gray-200 shadow-sm text-sm">
+                                    {editingStore?.id === store.id ? (
+                                        <>
+                                            <input 
+                                                autoFocus
+                                                value={editingStore.name} 
+                                                onChange={e => setEditingStore({...editingStore, name: e.target.value})}
+                                                className="w-20 px-1 py-0 text-xs border-b border-blue-400 outline-none"
+                                            />
+                                            <button onClick={handleUpdateStore} className="text-green-600"><Save size={14}/></button>
+                                            <button onClick={() => setEditingStore(null)} className="text-gray-400"><X size={14}/></button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="text-slate-700">{store.name}</span>
+                                            <button onClick={() => setEditingStore({id: store.id!, name: store.name})} className="text-gray-300 hover:text-blue-500 ml-1"><Edit2 size={12}/></button>
+                                            <button onClick={() => handleDeleteStoreRecord(store.id!, store.name)} className="text-gray-300 hover:text-red-500"><X size={14}/></button>
+                                        </>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 
                 <div className="flex flex-col md:flex-row gap-4 mb-4">
                     <div className="flex-1">
@@ -220,7 +315,7 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
                                 className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-200 focus:border-blue-500 outline-none font-bold text-slate-700"
                             />
                             <datalist id="store-suggestions">
-                                {SUGGESTED_STORES.map(s => <option key={s} value={s} />)}
+                                {availableStores.map(s => <option key={s.id} value={s.name} />)}
                             </datalist>
                         </div>
                     </div>
@@ -281,7 +376,7 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
                                     </div>
                                 </div>
                                 <button 
-                                    onClick={() => handleDeleteStore(stat.storeName)}
+                                    onClick={() => handleDeleteStoreHistory(stat.storeName)}
                                     disabled={isProcessing}
                                     className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors opacity-0 group-hover:opacity-100"
                                     title={`移除 ${stat.storeName} 的資料`}
