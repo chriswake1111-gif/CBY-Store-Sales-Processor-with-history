@@ -34,6 +34,9 @@ const DataViewer: React.FC<DataViewerProps> = ({
   onClose
 }) => {
   
+  // Ref to the main container to determine which Document/Window we are in (Main or Popout)
+  const rootRef = useRef<HTMLDivElement>(null);
+
   // Popover State for Repurchase Options
   const [popoverState, setPopoverState] = useState<{ rowId: string, x: number, y: number } | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -41,6 +44,13 @@ const DataViewer: React.FC<DataViewerProps> = ({
   // Popover State for History View (Modified to include targetRowId for selection)
   const [historyState, setHistoryState] = useState<{ x: number, y: number, records: HistoryRecord[], loading: boolean, targetRowId: string, targetCid: string, targetItemId: string } | null>(null);
   const historyRef = useRef<HTMLDivElement>(null);
+
+  // Helper to get the correct document/window context (fixes Popout issues)
+  const getContext = () => {
+    const doc = rootRef.current?.ownerDocument || document;
+    const win = doc.defaultView || window;
+    return { doc, win };
+  };
 
   // Close when clicking outside
   useEffect(() => {
@@ -54,8 +64,12 @@ const DataViewer: React.FC<DataViewerProps> = ({
         setHistoryState(null);
       }
     };
-    if (popoverState || historyState) document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    
+    // Attach listener to the correct document (Main or Popout)
+    const { doc } = getContext();
+    if (popoverState || historyState) doc.addEventListener('mousedown', handleClickOutside);
+    
+    return () => doc.removeEventListener('mousedown', handleClickOutside);
   }, [popoverState, historyState]);
 
   // Adjust Position Logic for Repurchase Popover
@@ -74,8 +88,11 @@ const DataViewer: React.FC<DataViewerProps> = ({
 
   const adjustPosition = (el: HTMLElement, targetX: number, targetY: number) => {
         const { width, height } = el.getBoundingClientRect();
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
+        
+        // Use the window dimensions of the context where the element is rendered
+        const currentWindow = el.ownerDocument.defaultView || window;
+        const viewportWidth = currentWindow.innerWidth;
+        const viewportHeight = currentWindow.innerHeight;
 
         let newX = targetX;
         let newY = targetY;
@@ -196,7 +213,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
   const specOpts = repurchaseOptions.filter(o => o.isEnabled && o.group === 'SPECIAL');
 
   return (
-    <div className="flex flex-col h-full bg-white relative text-sm">
+    <div ref={rootRef} className="flex flex-col h-full bg-white relative text-sm">
       
       {/* Top Controls */}
       <div className="border-b border-gray-300 bg-gray-50 p-2 shrink-0 flex flex-col gap-2">
@@ -418,7 +435,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
                          <button onClick={() => handlePopoverSelect('')} className="w-full mt-1 text-[10px] text-gray-400 hover:text-red-500 border border-transparent hover:border-red-100 rounded">清除狀態</button>
                     </div>
                 </div>,
-                document.body
+                rootRef.current ? (rootRef.current.ownerDocument.body) : document.body
             )}
 
             {/* History Popover Portal (Now with Selection Logic) */}
@@ -494,7 +511,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
                         點擊名字即可帶入
                      </div>
                 </div>,
-                document.body
+                rootRef.current ? (rootRef.current.ownerDocument.body) : document.body
             )}
           </>
         )}
