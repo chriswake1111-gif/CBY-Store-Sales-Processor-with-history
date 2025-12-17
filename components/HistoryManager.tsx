@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Database, Trash2, Upload, AlertTriangle, HardDrive, RefreshCw, X, Store, PieChart, CheckCircle2, Settings, Plus, Save, Edit2 } from 'lucide-react';
-import { getHistoryCount, clearHistory, bulkAddHistory, HistoryRecord, getHistoryStatsByStore, deleteStoreHistory, getStores, addStore, updateStore, deleteStore } from '../utils/db';
+import { Database, Trash2, Upload, AlertTriangle, HardDrive, RefreshCw, X, Store, PieChart, CheckCircle2, Settings, Plus, Save, Edit2, Calendar, ChevronRight } from 'lucide-react';
+import { getHistoryCount, clearHistory, bulkAddHistory, HistoryRecord, getHistoryStatsByStore, deleteStoreHistory, getStores, addStore, updateStore, deleteStore, getAvailableYearsByStore, deleteHistoryByYear } from '../utils/db';
 import { readExcelFile } from '../utils/excelHelper';
 import { COL_HEADERS } from '../constants';
 import { StoreRecord } from '../types';
@@ -30,6 +30,11 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
   const [showStoreManage, setShowStoreManage] = useState(false);
   const [newStoreName, setNewStoreName] = useState('');
   const [editingStore, setEditingStore] = useState<{id: number, name: string} | null>(null);
+
+  // Years View State
+  const [expandedStore, setExpandedStore] = useState<string | null>(null);
+  const [storeYears, setStoreYears] = useState<string[]>([]);
+  const [loadingYears, setLoadingYears] = useState(false);
 
   useEffect(() => {
     refreshStats();
@@ -60,15 +65,56 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
     setMessageType('success');
   };
 
-  const handleDeleteStoreHistory = async (storeName: string) => {
+  const handleDeleteStoreHistory = async (e: React.MouseEvent, storeName: string) => {
+    e.stopPropagation(); // Prevent toggling expanded view
     if (!window.confirm(`確定要移除「${storeName}」的所有歷史資料嗎？`)) return;
     setIsProcessing(true);
     try {
         await deleteStoreHistory(storeName);
+        if (expandedStore === storeName) setExpandedStore(null);
         await refreshStats();
         setMessage(`已移除 ${storeName} 的資料`);
         setMessageType('success');
     } catch (e) {
+        alert("刪除失敗");
+    } finally {
+        setIsProcessing(false);
+    }
+  };
+
+  const handleToggleStoreYears = async (storeName: string) => {
+    if (expandedStore === storeName) {
+      setExpandedStore(null);
+      setStoreYears([]);
+      return;
+    }
+
+    setExpandedStore(storeName);
+    setLoadingYears(true);
+    try {
+      const years = await getAvailableYearsByStore(storeName);
+      setStoreYears(years);
+    } catch (err) {
+      console.error("Failed to load years", err);
+    } finally {
+      setLoadingYears(false);
+    }
+  };
+
+  const handleDeleteYear = async (e: React.MouseEvent, storeName: string, year: string) => {
+    e.stopPropagation();
+    if (!window.confirm(`確定要刪除「${storeName}」在民國 ${year} 年的所有歷史資料嗎？`)) return;
+    
+    setIsProcessing(true);
+    try {
+        await deleteHistoryByYear(storeName, year);
+        // Refresh local years list
+        const updatedYears = await getAvailableYearsByStore(storeName);
+        setStoreYears(updatedYears);
+        await refreshStats();
+        setMessage(`已刪除 ${storeName} ${year} 年資料`);
+        setMessageType('success');
+    } catch (err) {
         alert("刪除失敗");
     } finally {
         setIsProcessing(false);
@@ -358,33 +404,76 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
             </div>
 
             {/* Store Stats List */}
-            <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-                <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 font-bold text-sm text-slate-600 flex items-center gap-2">
-                    <PieChart size={16}/> 分店資料統計
+            <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 font-bold text-sm text-slate-600 flex items-center gap-2 shrink-0">
+                    <PieChart size={16}/> 分店資料統計 (點擊分店檢視年份)
                 </div>
-                <div className="divide-y divide-gray-100">
+                <div className="divide-y divide-gray-100 overflow-y-auto">
                     {storeStats.length === 0 ? (
                         <div className="p-4 text-center text-gray-400 text-sm">目前資料庫是空的</div>
                     ) : (
-                        storeStats.map((stat) => (
-                            <div key={stat.storeName} className="p-3 flex items-center justify-between hover:bg-gray-50 group">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-2 h-8 bg-blue-400 rounded-sm"></div>
-                                    <div>
-                                        <div className="font-bold text-slate-700 text-sm">{stat.storeName}</div>
-                                        <div className="text-xs text-slate-400 font-mono">{stat.count.toLocaleString()} rows</div>
+                        storeStats.map((stat) => {
+                            const isExpanded = expandedStore === stat.storeName;
+                            return (
+                                <div key={stat.storeName} className="flex flex-col">
+                                    <div 
+                                        onClick={() => handleToggleStoreYears(stat.storeName)}
+                                        className={`p-3 flex items-center justify-between hover:bg-blue-50 transition-colors cursor-pointer group ${isExpanded ? 'bg-blue-50/50' : ''}`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-1.5 h-8 rounded-full transition-colors ${isExpanded ? 'bg-blue-600' : 'bg-slate-300 group-hover:bg-blue-400'}`}></div>
+                                            <div>
+                                                <div className="font-bold text-slate-700 text-sm flex items-center gap-1">
+                                                  {stat.storeName}
+                                                  <ChevronRight size={14} className={`text-slate-400 transition-transform ${isExpanded ? 'rotate-90 text-blue-500' : ''}`} />
+                                                </div>
+                                                <div className="text-xs text-slate-400 font-mono">{stat.count.toLocaleString()} rows</div>
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={(e) => handleDeleteStoreHistory(e, stat.storeName)}
+                                            disabled={isProcessing}
+                                            className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                                            title={`移除 ${stat.storeName} 的所有資料`}
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
                                     </div>
+
+                                    {/* Expanded Years View */}
+                                    {isExpanded && (
+                                        <div className="px-12 py-3 bg-white border-b border-gray-100 animate-in slide-in-from-top-2 duration-200">
+                                            <div className="flex items-center gap-2 mb-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                                <Calendar size={12}/> 包含年份 (點擊 X 可清除單一年度)
+                                            </div>
+                                            {loadingYears ? (
+                                                <div className="flex items-center gap-2 text-xs text-blue-500">
+                                                    <RefreshCw size={12} className="animate-spin" /> 讀取中...
+                                                </div>
+                                            ) : storeYears.length > 0 ? (
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {storeYears.map(year => (
+                                                        <div key={year} className="group/year flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono font-bold border border-blue-200 shadow-sm">
+                                                            <span>{year}</span>
+                                                            <button 
+                                                                onClick={(e) => handleDeleteYear(e, stat.storeName, year)}
+                                                                disabled={isProcessing}
+                                                                className="text-blue-400 hover:text-red-600 transition-colors p-0.5 rounded-full hover:bg-red-50"
+                                                                title={`刪除 ${year} 年資料`}
+                                                            >
+                                                                <X size={10} />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="text-xs text-gray-300 italic">無年份資訊</div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
-                                <button 
-                                    onClick={() => handleDeleteStoreHistory(stat.storeName)}
-                                    disabled={isProcessing}
-                                    className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors opacity-0 group-hover:opacity-100"
-                                    title={`移除 ${stat.storeName} 的資料`}
-                                >
-                                    <Trash2 size={16} />
-                                </button>
-                            </div>
-                        ))
+                            );
+                        })
                     )}
                 </div>
             </div>

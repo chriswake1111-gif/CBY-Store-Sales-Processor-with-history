@@ -6,7 +6,7 @@ export interface HistoryRecord {
   id?: number;
   customerID: string;
   itemID: string;
-  date: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD or ROC Year (YYYMMDD...)
   quantity: number; // Added quantity field
   storeName?: string; // New field for Branch separation
   salesPerson?: string; // New field for Sales Person
@@ -131,10 +131,45 @@ export const getHistoryStatsByStore = async (): Promise<{ storeName: string; cou
     .sort((a, b) => b.count - a.count); // Sort by count desc
 };
 
+/**
+ * Get unique years for a specific store's historical records
+ * Updated to support ROC Year format (first 3 digits)
+ */
+export const getAvailableYearsByStore = async (storeName: string): Promise<string[]> => {
+  let records: HistoryRecord[];
+  if (storeName === '未分類 (舊資料)') {
+    records = await db.history.filter(r => !r.storeName).toArray();
+  } else {
+    records = await db.history.where('storeName').equals(storeName).toArray();
+  }
+
+  const years = new Set<string>();
+  records.forEach(r => {
+    const year = r.date ? String(r.date).substring(0, 3) : null;
+    if (year && /^\d{3}$/.test(year)) {
+      years.add(year);
+    }
+  });
+
+  return Array.from(years).sort((a, b) => b.localeCompare(a)); // Newest years first
+};
+
+/**
+ * Delete specific year's data for a store
+ */
+export const deleteHistoryByYear = async (storeName: string, year: string) => {
+  if (storeName === '未分類 (舊資料)') {
+    await db.history.filter(r => !r.storeName && String(r.date).substring(0, 3) === year).delete();
+  } else {
+    // Note: where('storeName') is indexed, then we filter by year logic
+    await db.history.where('storeName').equals(storeName)
+      .filter(r => String(r.date).substring(0, 3) === year)
+      .delete();
+  }
+};
+
 export const deleteStoreHistory = async (storeName: string) => {
   if (storeName === '未分類 (舊資料)') {
-    // Delete where storeName is undefined or null or empty
-    // Dexie doesn't query undefined easily with equals, so we iterate or use collection
     await db.history.filter(node => !node.storeName).delete();
   } else {
     await db.history.where('storeName').equals(storeName).delete();
