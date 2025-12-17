@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { ProcessedData, Stage1Status, RepurchaseOption } from '../types';
-import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, CalendarClock } from 'lucide-react';
+import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { getItemHistory, HistoryRecord } from '../utils/db'; // Import History Logic
 
@@ -38,8 +38,8 @@ const DataViewer: React.FC<DataViewerProps> = ({
   const [popoverState, setPopoverState] = useState<{ rowId: string, x: number, y: number } | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Popover State for History View
-  const [historyState, setHistoryState] = useState<{ x: number, y: number, records: HistoryRecord[], loading: boolean } | null>(null);
+  // Popover State for History View (Modified to include targetRowId for selection)
+  const [historyState, setHistoryState] = useState<{ x: number, y: number, records: HistoryRecord[], loading: boolean, targetRowId: string, targetCid: string, targetItemId: string } | null>(null);
   const historyRef = useRef<HTMLDivElement>(null);
 
   // Close when clicking outside
@@ -100,12 +100,20 @@ const DataViewer: React.FC<DataViewerProps> = ({
     setPopoverState({ rowId, x: e.clientX + 10, y: e.clientY + 10 });
   };
 
-  const openHistory = async (e: React.MouseEvent, customerID: string, itemID: string) => {
+  const openHistoryAndSelectDev = async (e: React.MouseEvent, customerID: string, itemID: string, rowId: string) => {
       e.stopPropagation();
       setPopoverState(null); // Close other popover
 
       // Set Loading State
-      setHistoryState({ x: e.clientX + 10, y: e.clientY + 10, records: [], loading: true });
+      setHistoryState({ 
+          x: e.clientX + 10, 
+          y: e.clientY + 10, 
+          records: [], 
+          loading: true, 
+          targetRowId: rowId,
+          targetCid: customerID,
+          targetItemId: itemID
+      });
 
       try {
           const records = await getItemHistory(customerID, itemID);
@@ -120,6 +128,13 @@ const DataViewer: React.FC<DataViewerProps> = ({
     if (popoverState) {
         handleUpdateStage1Action2(popoverState.rowId, 'repurchaseType', val);
         setPopoverState(null);
+    }
+  };
+
+  const handleDeveloperSelect = (name: string) => {
+    if (historyState && historyState.targetRowId) {
+        handleUpdateStage1Action2(historyState.targetRowId, 'originalDeveloper', name);
+        setHistoryState(null);
     }
   };
 
@@ -318,18 +333,21 @@ const DataViewer: React.FC<DataViewerProps> = ({
                       {/* ACTION 2 */}
                       <td className="px-2 py-1 border border-slate-200 align-top">
                         <div className={`flex gap-1 ${!isAction2Active ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
-                             {/* Original Developer */}
+                             {/* Original Developer Selector (Merged with History) */}
                              <div className="relative flex-1">
-                                <select 
-                                    value={row.originalDeveloper || ''}
-                                    onChange={(e) => handleUpdateStage1Action2(row.id, 'originalDeveloper', e.target.value)}
-                                    className="w-full text-[10px] border border-gray-300 rounded px-1 py-0.5 bg-white text-slate-700 focus:border-blue-500 outline-none appearance-none pr-3"
+                                <button
+                                    onClick={(e) => openHistoryAndSelectDev(e, row.customerID, row.itemID, row.id)}
+                                    className={`
+                                      w-full text-[10px] border rounded px-1 py-0.5 text-left flex items-center justify-between
+                                      ${row.originalDeveloper && row.originalDeveloper !== '無' 
+                                          ? 'bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100' 
+                                          : 'bg-white border-gray-300 text-gray-500 hover:border-blue-400 hover:text-blue-600'}
+                                    `}
+                                    title="點擊選擇原開發者 (開啟歷史紀錄)"
                                 >
-                                    <option value="" disabled>原開發</option>
-                                    <option value="無">無</option>
-                                    {allActiveStaff.map(s => <option key={s} value={s}>{s}</option>)}
-                                </select>
-                                <ChevronDown size={10} className="absolute right-0.5 top-1.5 text-gray-400 pointer-events-none"/>
+                                    <span className="truncate">{row.originalDeveloper || '選擇開發'}</span>
+                                    <UserPlus size={10} className="opacity-50 shrink-0 ml-1"/>
+                                </button>
                              </div>
 
                              {/* Repurchase Status */}
@@ -350,20 +368,9 @@ const DataViewer: React.FC<DataViewerProps> = ({
                       <td className={`px-2 py-1 border border-slate-200 font-mono ${isDel ? 'text-gray-300 line-through' : 'text-slate-600'}`}>{row.date}</td>
                       <td className={`px-2 py-1 border border-slate-200 font-mono ${isDel ? 'text-gray-300 line-through' : 'text-slate-600'}`}>{formatCID(row.customerID)}</td>
                       
-                      {/* Item ID - Clickable for History */}
+                      {/* Item ID - Plain Text now */}
                       <td className={`px-2 py-1 border border-slate-200 font-mono text-[11px] ${isDel ? 'text-gray-300 line-through' : 'text-slate-500'}`}>
-                        {isRep && !isDel ? (
-                            <button 
-                                onClick={(e) => openHistory(e, row.customerID, row.itemID)}
-                                className="flex items-center gap-1 hover:text-blue-600 hover:underline transition-colors"
-                                title="點擊查看歷史購買紀錄"
-                            >
-                                {row.itemID}
-                                <History size={10} className="opacity-60"/>
-                            </button>
-                        ) : (
-                            row.itemID
-                        )}
+                         {row.itemID}
                       </td>
 
                       <td className={`px-2 py-1 border border-slate-200 ${isDel ? 'text-gray-300 line-through' : 'text-slate-800 font-medium'}`}>{row.itemName}</td>
@@ -414,47 +421,78 @@ const DataViewer: React.FC<DataViewerProps> = ({
                 document.body
             )}
 
-            {/* History Popover Portal */}
+            {/* History Popover Portal (Now with Selection Logic) */}
             {historyState && createPortal(
                 <div 
                     ref={historyRef}
                     className="fixed z-[100] bg-white rounded-lg shadow-xl border border-slate-200 w-80 overflow-hidden animate-in fade-in zoom-in-95 duration-100 flex flex-col max-h-[300px]"
                     style={{ left: historyState.x, top: historyState.y }}
                 >
-                    <div className="bg-slate-100 px-3 py-2 border-b border-gray-200 flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                            <History size={12} className="text-blue-500"/> 歷史購買紀錄
-                        </span>
+                    <div className="bg-slate-100 px-3 py-2 border-b border-gray-200 flex items-center justify-between shrink-0">
+                        <div className="flex flex-col">
+                           <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                                <History size={12} className="text-blue-500"/> 選擇原開發者
+                           </span>
+                           <span className="text-[10px] text-gray-400 font-mono">{historyState.targetItemId}</span>
+                        </div>
+                        <button onClick={() => handleDeveloperSelect('無')} className="text-[10px] px-2 py-1 bg-white border border-gray-300 text-gray-500 hover:text-red-600 hover:border-red-300 rounded transition-colors flex items-center gap-1">
+                            <XCircle size={10}/> 設為無
+                        </button>
                     </div>
                     
-                    <div className="overflow-y-auto flex-1 p-0">
+                    <div className="overflow-y-auto flex-1 p-0 bg-white">
                         {historyState.loading ? (
                             <div className="p-4 flex justify-center text-blue-500"><Loader2 className="animate-spin" size={20}/></div>
                         ) : historyState.records.length === 0 ? (
-                            <div className="p-4 text-center text-xs text-gray-400">查無資料</div>
+                            <div className="p-4 text-center">
+                                <div className="text-xs text-gray-400 mb-2">查無購買紀錄</div>
+                                <div className="text-[10px] text-gray-300">請確認是否已匯入歷史資料</div>
+                            </div>
                         ) : (
                             <div className="divide-y divide-gray-100">
-                                {historyState.records.map((rec, idx) => (
-                                    <div key={idx} className="px-3 py-2 hover:bg-gray-50 flex items-center justify-between text-xs font-mono">
-                                        {/* Date + 2 spaces + Qty + 2 spaces + Store + Sales Person */}
-                                        <div className="flex items-center text-slate-600">
-                                            <span>{rec.date}</span>
-                                            <span className="w-2 inline-block"></span>
-                                            <span className="font-bold text-slate-800 w-6 text-center">{rec.quantity || '-'}</span>
-                                            <span className="w-2 inline-block"></span>
-                                            <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded border border-blue-100 whitespace-nowrap">
-                                                {(rec.storeName || '未知').substring(0, 2)}
-                                            </span>
-                                            <span className="w-1 inline-block"></span>
-                                            <span className="text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded border border-purple-100 whitespace-nowrap">
-                                                 {rec.salesPerson || '無'}
-                                            </span>
+                                {historyState.records.map((rec, idx) => {
+                                    // Check if staff is active
+                                    const isActive = rec.salesPerson && allActiveStaff.includes(rec.salesPerson);
+                                    
+                                    return (
+                                        <div key={idx} className="px-3 py-2 hover:bg-blue-50/50 flex items-center justify-between text-xs font-mono group">
+                                            {/* Date + 2 spaces + Qty + 2 spaces + Store */}
+                                            <div className="flex items-center text-slate-600">
+                                                <span>{rec.date}</span>
+                                                <span className="w-2 inline-block"></span>
+                                                <span className="font-bold text-slate-800 w-6 text-center">{rec.quantity || '-'}</span>
+                                                <span className="w-2 inline-block"></span>
+                                                <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded border border-gray-200 whitespace-nowrap">
+                                                    {(rec.storeName || '未知').substring(0, 2)}
+                                                </span>
+                                            </div>
+
+                                            {/* Sales Person Selection Button */}
+                                            <button 
+                                                onClick={() => rec.salesPerson && handleDeveloperSelect(rec.salesPerson)}
+                                                disabled={!rec.salesPerson}
+                                                className={`
+                                                    text-[10px] px-2 py-0.5 rounded border whitespace-nowrap transition-all flex items-center gap-1
+                                                    ${!rec.salesPerson ? 'bg-gray-50 text-gray-300 border-transparent cursor-default' : 
+                                                      isActive 
+                                                        ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 hover:border-purple-300 hover:shadow-sm cursor-pointer' 
+                                                        : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200 hover:text-gray-600 cursor-pointer'}
+                                                `}
+                                                title={isActive ? "點擊選取" : "已離職或非現職人員"}
+                                            >
+                                                {rec.salesPerson || '無'}
+                                                {rec.salesPerson && <UserPlus size={8} className="opacity-0 group-hover:opacity-100 transition-opacity"/>}
+                                            </button>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
+                    {/* Fallback Manual Selection Hint */}
+                     <div className="p-1 bg-gray-50 text-[9px] text-gray-400 text-center border-t border-gray-100">
+                        點擊名字即可帶入
+                     </div>
                 </div>,
                 document.body
             )}
