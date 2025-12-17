@@ -8,6 +8,7 @@ export interface HistoryRecord {
   date: string; // YYYY-MM-DD
   quantity: number; // Added quantity field
   storeName?: string; // New field for Branch separation
+  salesPerson?: string; // New field for Sales Person
 }
 
 export interface TemplateMapping {

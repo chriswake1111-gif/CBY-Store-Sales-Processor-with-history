@@ -118,13 +118,17 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
           
           // Fix: Use Sales Date if available, otherwise fallback to Ticket No ('單號')
           const dateStr = String(row[COL_HEADERS.SALES_DATE] || row[COL_HEADERS.TICKET_NO] || '').trim();
+          
+          // Get Sales Person
+          const salesPerson = String(row[COL_HEADERS.SALES_PERSON] || '').trim();
 
           buffer.push({
             customerID: cid,
             itemID: itemID,
             date: dateStr,
             quantity: qty,
-            storeName: storeName
+            storeName: storeName,
+            salesPerson: salesPerson
           });
         } else {
             skipped++;

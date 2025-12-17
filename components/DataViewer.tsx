@@ -418,7 +418,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
             {historyState && createPortal(
                 <div 
                     ref={historyRef}
-                    className="fixed z-[100] bg-white rounded-lg shadow-xl border border-slate-200 w-64 overflow-hidden animate-in fade-in zoom-in-95 duration-100 flex flex-col max-h-[300px]"
+                    className="fixed z-[100] bg-white rounded-lg shadow-xl border border-slate-200 w-80 overflow-hidden animate-in fade-in zoom-in-95 duration-100 flex flex-col max-h-[300px]"
                     style={{ left: historyState.x, top: historyState.y }}
                 >
                     <div className="bg-slate-100 px-3 py-2 border-b border-gray-200 flex items-center justify-between">
@@ -436,7 +436,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
                             <div className="divide-y divide-gray-100">
                                 {historyState.records.map((rec, idx) => (
                                     <div key={idx} className="px-3 py-2 hover:bg-gray-50 flex items-center justify-between text-xs font-mono">
-                                        {/* Date + 2 spaces + Qty + 2 spaces + Store */}
+                                        {/* Date + 2 spaces + Qty + 2 spaces + Store + Sales Person */}
                                         <div className="flex items-center text-slate-600">
                                             <span>{rec.date}</span>
                                             <span className="w-2 inline-block"></span>
@@ -444,6 +444,10 @@ const DataViewer: React.FC<DataViewerProps> = ({
                                             <span className="w-2 inline-block"></span>
                                             <span className="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded border border-blue-100 whitespace-nowrap">
                                                 {(rec.storeName || '未知').substring(0, 2)}
+                                            </span>
+                                            <span className="w-1 inline-block"></span>
+                                            <span className="text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded border border-purple-100 whitespace-nowrap">
+                                                 {rec.salesPerson || '無'}
                                             </span>
                                         </div>
                                     </div>
