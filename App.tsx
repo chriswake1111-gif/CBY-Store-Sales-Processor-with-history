@@ -101,8 +101,8 @@ const App: React.FC = () => {
     stateRef.current = { exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList };
   }, [exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList]);
 
-  // PWA & Install Handlers (Omitted for brevity, kept same)
-  // ... (Keep existing PWA logic) ...
+  // PWA & Install Handlers
+  // ... (existing logic)
 
   const handleManualSave = () => {
     const ts = saveToLocal(stateRef.current);
@@ -351,6 +351,10 @@ const App: React.FC = () => {
      return Object.keys(processedData).filter(p => processedData[p].role !== 'NO_BONUS').sort();
   }, [processedData]);
 
+  const activeStaffRecord = useMemo(() => {
+     return staffMasterList.find(s => s.name === activePerson);
+  }, [staffMasterList, activePerson]);
+
   const currentData = useMemo(() => activePerson ? processedData[activePerson] : null, [processedData, activePerson]);
   
   const stage1TotalPoints = useMemo(() => {
@@ -368,7 +372,8 @@ const App: React.FC = () => {
     handleStatusChangeStage1, handleToggleDeleteStage2, handleUpdateStage2CustomReward, onClose: isPopOut ? () => setIsPopOut(false) : undefined,
     handleUpdateStage1Action2,
     repurchaseOptions,
-    allActiveStaff
+    allActiveStaff,
+    staffRecord: activeStaffRecord
   };
   
   const classificationNames = useMemo(() => {

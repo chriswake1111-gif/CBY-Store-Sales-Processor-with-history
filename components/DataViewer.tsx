@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { ProcessedData, Stage1Status, RepurchaseOption } from '../types';
-import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle } from 'lucide-react';
+import { ProcessedData, Stage1Status, RepurchaseOption, StaffRecord } from '../types';
+import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { getItemHistory, HistoryRecord } from '../utils/db'; // Import History Logic
 
@@ -22,6 +22,7 @@ interface DataViewerProps {
   handleUpdateStage1Action2: (id: string, field: 'originalDeveloper' | 'repurchaseType', val: string) => void;
   repurchaseOptions: RepurchaseOption[];
   allActiveStaff: string[];
+  staffRecord?: StaffRecord;
   
   onClose?: () => void;
 }
@@ -30,7 +31,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
   sortedPeople, selectedPersons, togglePersonSelection, activePerson, setActivePerson,
   currentData, activeTab, setActiveTab, stage1TotalPoints,
   handleStatusChangeStage1, handleToggleDeleteStage2, handleUpdateStage2CustomReward,
-  handleUpdateStage1Action2, repurchaseOptions, allActiveStaff,
+  handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord,
   onClose
 }) => {
   
@@ -241,19 +242,54 @@ const DataViewer: React.FC<DataViewerProps> = ({
 
          {/* Header & Tabs */}
          <div className="flex justify-between items-end">
-            <div className="flex items-center gap-3">
-                <div className={`w-8 h-8 rounded border flex items-center justify-center ${theme.bgAccent} ${theme.borderAccent} ${theme.accent}`}>
-                    <User size={16} />
+            <div className="flex items-center gap-4">
+                <div className={`w-10 h-10 rounded border flex items-center justify-center ${theme.bgAccent} ${theme.borderAccent} ${theme.accent} shadow-sm`}>
+                    <User size={20} />
                 </div>
-                <div>
-                    <h2 className="text-lg font-bold text-slate-800 leading-tight flex items-center gap-2">
-                        {activePerson}
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded border ${theme.borderAccent} ${theme.badge} uppercase tracking-wider`}>
+                <div className="flex flex-col">
+                    <div className="flex items-center gap-2">
+                        <h2 className="text-lg font-black text-slate-800 leading-none">
+                            {activePerson}
+                        </h2>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${theme.borderAccent} ${theme.badge} uppercase tracking-wider`}>
                             {isPharm ? 'Pharmacist' : 'Sales'}
                         </span>
-                    </h2>
-                    <p className="text-[10px] text-gray-500 font-mono">ID: {currentData.stage1[0]?.salesPerson || 'N/A'}</p>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                        <p className="text-[10px] text-gray-500 font-mono">ID: {staffRecord?.id || currentData.stage1[0]?.salesPerson || 'N/A'}</p>
+                        {staffRecord?.branch && (
+                            <span className="text-[10px] text-slate-400 flex items-center gap-0.5 border-l border-gray-300 pl-2">
+                                <Target size={10}/> {staffRecord.branch}
+                            </span>
+                        )}
+                    </div>
                 </div>
+                
+                {/* Performance Targets Badge Section */}
+                {(staffRecord?.pointsStandard || staffRecord?.cosmeticStandard) && (
+                    <div className="ml-6 flex items-center gap-3">
+                         {staffRecord.pointsStandard !== undefined && (
+                             <div className="bg-white px-2.5 py-1 rounded border border-gray-200 shadow-sm flex flex-col items-center">
+                                 <div className="text-[8px] text-gray-400 font-black uppercase flex items-center gap-1">
+                                    <TrendingUp size={8}/> Points Target
+                                 </div>
+                                 <div className="text-xs font-mono font-black text-blue-700">
+                                    {staffRecord.pointsStandard.toLocaleString()}
+                                 </div>
+                             </div>
+                         )}
+                         {staffRecord.cosmeticStandard !== undefined && (
+                             <div className="bg-white px-2.5 py-1 rounded border border-gray-200 shadow-sm flex flex-col items-center">
+                                 <div className="text-[8px] text-gray-400 font-black uppercase flex items-center gap-1">
+                                    <Package size={8}/> Cosmetic Target
+                                 </div>
+                                 <div className="text-xs font-mono font-black text-emerald-700">
+                                    ${staffRecord.cosmeticStandard.toLocaleString()}
+                                 </div>
+                             </div>
+                         )}
+                    </div>
+                )}
             </div>
 
             <div className="flex items-end gap-1">
