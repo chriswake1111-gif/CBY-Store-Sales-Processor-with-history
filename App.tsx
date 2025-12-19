@@ -1,10 +1,9 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { RawRow, ExclusionItem, RewardRule, ProcessedData, Stage1Status, StaffRole, Stage3Summary, RepurchaseOption, StaffRecord } from './types';
 import { readExcelFile, exportToExcel } from './utils/excelHelper';
 import { processStage1, processStage2, processStage3, recalculateStage1Points, generateEmptyStage3Rows } from './utils/processor';
 import { saveToLocal, loadFromLocal, checkSavedData } from './utils/storage';
-import { seedDefaultStores } from './utils/db'; // Import seed function
+import { seedDefaultStores } from './utils/db'; 
 import FileUploader from './components/FileUploader';
 import PopoutWindow from './components/PopoutWindow';
 import DataViewer from './components/DataViewer';
@@ -14,12 +13,10 @@ import HistoryManager from './components/HistoryManager';
 import ExportSettingsModal from './components/ExportSettingsModal';
 import RepurchaseSettingsModal from './components/RepurchaseSettingsModal'; 
 import StaffManagerModal from './components/StaffManagerModal'; 
-import { Download, Maximize2, AlertCircle, MonitorDown, Save, FolderOpen, Activity, FileSpreadsheet, HelpCircle, Database, Loader2, Settings, Users, ClipboardList } from 'lucide-react';
+import { Download, Maximize2, AlertCircle, RefreshCcw, Save, FolderOpen, Activity, FileSpreadsheet, HelpCircle, Database, Loader2, Settings, Users, ClipboardList } from 'lucide-react';
 import { COL_HEADERS } from './constants';
-import { v4 as uuidv4 } from 'uuid';
 
 const DEFAULT_REPURCHASE_OPTIONS: RepurchaseOption[] = [
-  // General (3 cols)
   { id: 'g1', label: '3+1', group: 'GENERAL', isEnabled: true },
   { id: 'g2', label: '8+3', group: 'GENERAL', isEnabled: true },
   { id: 'g3', label: '12+5', group: 'GENERAL', isEnabled: true },
@@ -35,14 +32,13 @@ const DEFAULT_REPURCHASE_OPTIONS: RepurchaseOption[] = [
   { id: 'g13', label: '小盒開發', group: 'GENERAL', isEnabled: true },
   { id: 'g14', label: '大盒開發', group: 'GENERAL', isEnabled: true },
   { id: 'g15', label: '調劑開發', group: 'GENERAL', isEnabled: true },
-  // Special (2 cols)
-  { id: 's1', label: '', group: 'SPECIAL', isEnabled: false }, // Placeholder
+  { id: 's1', label: '', group: 'SPECIAL', isEnabled: false }, 
   { id: 's2', label: '過年2件', group: 'SPECIAL', isEnabled: true },
-  { id: 's3', label: '', group: 'SPECIAL', isEnabled: false }, // Placeholder
+  { id: 's3', label: '', group: 'SPECIAL', isEnabled: false }, 
   { id: 's4', label: '快閃2件', group: 'SPECIAL', isEnabled: true },
-  { id: 's5', label: '', group: 'SPECIAL', isEnabled: false }, // Placeholder
+  { id: 's5', label: '', group: 'SPECIAL', isEnabled: false }, 
   { id: 's6', label: '母親節2件', group: 'SPECIAL', isEnabled: true },
-  { id: 's7', label: '', group: 'SPECIAL', isEnabled: false }, // Placeholder
+  { id: 's7', label: '', group: 'SPECIAL', isEnabled: false }, 
   { id: 's8', label: '父親節2件', group: 'SPECIAL', isEnabled: true },
 ];
 
@@ -92,6 +88,23 @@ const App: React.FC = () => {
     stateRef.current = { exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList };
   }, [exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList]);
 
+  const handleForceRefresh = () => {
+    if (window.confirm("確定要強制刷新程式嗎？這會清除瀏覽器快取並重新載入，未儲存的進度將會遺失。")) {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(registrations => {
+          for (let registration of registrations) {
+            registration.unregister();
+          }
+          // Removed the deprecated 'true' argument as reload() expects no arguments.
+          window.location.reload();
+        });
+      } else {
+        // Removed the deprecated 'true' argument as reload() expects no arguments.
+        window.location.reload();
+      }
+    }
+  };
+
   const handleManualSave = () => {
     const ts = saveToLocal(stateRef.current);
     if (ts) {
@@ -113,7 +126,6 @@ const App: React.FC = () => {
       setStaffRoles(saved.staffRoles || {});
       setRepurchaseOptions(saved.repurchaseOptions || DEFAULT_REPURCHASE_OPTIONS);
       setStaffMasterList(saved.staffMasterList || []);
-      
       setLastSaveTime(saved.timestamp);
       setHasSavedData(true);
       alert(`已還原 ${new Date(saved.timestamp).toLocaleString()} 的存檔`);
@@ -321,12 +333,15 @@ const App: React.FC = () => {
                   </button>
                 </h1>
                 <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.0.1</span>
+                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.0.2</span>
                     {lastSaveTime && <span className="flex items-center gap-1 border-l border-slate-700 pl-2"><Save size={10}/> {new Date(lastSaveTime).toLocaleTimeString()}</span>}
                 </div>
              </div>
           </div>
           <div className="flex gap-2">
+             <button onClick={handleForceRefresh} className="flex items-center gap-2 px-3 py-1.5 text-xs text-red-200 bg-slate-800 border border-red-900/30 hover:bg-red-950 hover:text-white transition-colors font-medium rounded-sm" title="若版本號未更新，請按此強制更新">
+                <RefreshCcw size={14}/> 強制重新整理
+             </button>
              <button onClick={() => setShowRepurchaseSettings(true)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-purple-200 bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:text-white transition-colors font-medium rounded-sm">
                 <ClipboardList size={14}/> 回購狀態表
              </button>

@@ -3,25 +3,21 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 
-// Step 3: Register Service Worker with update detection
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js')
       .then(registration => {
         console.log('SW registered: ', registration);
         
-        // Listen for updates
         registration.onupdatefound = () => {
           const installingWorker = registration.installing;
           if (installingWorker) {
             installingWorker.onstatechange = () => {
               if (installingWorker.state === 'installed') {
                 if (navigator.serviceWorker.controller) {
-                  // New content is available; please refresh.
-                  console.log('New content available, force reloading...');
-                  // We can either notify user or force reload.
-                  // For this internal tool, a force reload ensures they don't use old logic.
-                  window.location.reload();
+                  console.log('New content available, preparing reload...');
+                  // We don't force reload immediately here to prevent disrupting user work
+                  // The "Force Refresh" button in UI handles the manual bypass
                 }
               }
             };
