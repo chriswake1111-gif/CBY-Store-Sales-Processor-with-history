@@ -63,3 +63,15 @@ export interface StoreRecord {
   name: string;
   isActive: boolean;
 }
+
+// New Types for Product Grouping
+export interface GroupItem {
+  itemID: string;
+  alias: string; // e.g., "小", "大", "調"
+}
+
+export interface ProductGroup {
+  id?: number;
+  groupName: string;
+  items: GroupItem[];
+}

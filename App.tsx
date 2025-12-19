@@ -14,7 +14,8 @@ import HistoryManager from './components/HistoryManager';
 import ExportSettingsModal from './components/ExportSettingsModal';
 import RepurchaseSettingsModal from './components/RepurchaseSettingsModal'; 
 import StaffManagerModal from './components/StaffManagerModal'; 
-import { Download, Maximize2, AlertCircle, RefreshCcw, Save, FolderOpen, Activity, FileSpreadsheet, HelpCircle, Database, Loader2, Settings, Users, ClipboardList } from 'lucide-react';
+import ProductGroupModal from './components/ProductGroupModal';
+import { Download, Maximize2, AlertCircle, RefreshCcw, Save, FolderOpen, Activity, FileSpreadsheet, HelpCircle, Database, Loader2, Settings, Users, ClipboardList, Layers } from 'lucide-react';
 import { COL_HEADERS } from './constants';
 
 const DEFAULT_REPURCHASE_OPTIONS: RepurchaseOption[] = [
@@ -68,6 +69,7 @@ const App: React.FC = () => {
   const [showExportSettings, setShowExportSettings] = useState(false);
   const [showRepurchaseSettings, setShowRepurchaseSettings] = useState(false); 
   const [showStaffManager, setShowStaffManager] = useState(false); 
+  const [showProductGroups, setShowProductGroups] = useState(false);
 
   const [lastSaveTime, setLastSaveTime] = useState<number | null>(null);
   const [hasSavedData, setHasSavedData] = useState<boolean>(false);
@@ -334,7 +336,7 @@ const App: React.FC = () => {
                   </button>
                 </h1>
                 <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.0.6</span>
+                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.0.8</span>
                     {lastSaveTime && <span className="flex items-center gap-1 border-l border-slate-700 pl-2"><Save size={10}/> {new Date(lastSaveTime).toLocaleTimeString()}</span>}
                 </div>
              </div>
@@ -342,6 +344,9 @@ const App: React.FC = () => {
           <div className="flex gap-2">
              <button onClick={handleForceRefresh} className="flex items-center gap-2 px-3 py-1.5 text-xs text-red-200 bg-slate-800 border border-red-900/30 hover:bg-red-950 hover:text-white transition-colors font-medium rounded-sm" title="若版本號未更新，請按此強制更新">
                 <RefreshCcw size={14}/> 強制重新整理
+             </button>
+             <button onClick={() => setShowProductGroups(true)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-purple-200 bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:text-white transition-colors font-medium rounded-sm">
+                <Layers size={14}/> 商品群組
              </button>
              <button onClick={() => setShowRepurchaseSettings(true)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-purple-200 bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:text-white transition-colors font-medium rounded-sm">
                 <ClipboardList size={14}/> 回購狀態表
@@ -407,6 +412,7 @@ const App: React.FC = () => {
       {showExportSettings && <ExportSettingsModal onClose={() => setShowExportSettings(false)} />}
       {showRepurchaseSettings && <RepurchaseSettingsModal options={repurchaseOptions} onSave={(opts) => { setRepurchaseOptions(opts); setShowRepurchaseSettings(false); }} onClose={() => setShowRepurchaseSettings(false)} />}
       {showStaffManager && <StaffManagerModal staffList={staffMasterList} onSave={(list) => { setStaffMasterList(list); setShowStaffManager(false); }} onClose={() => setShowStaffManager(false)} />}
+      {showProductGroups && <ProductGroupModal onClose={() => setShowProductGroups(false)} />}
     </>
   );
 };

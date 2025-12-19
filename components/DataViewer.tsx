@@ -422,7 +422,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
                       <td className={`px-2 py-1 border border-slate-200 font-mono ${isDel ? 'text-gray-300 line-through' : 'text-slate-600'}`}>{formatCID(row.customerID)}</td>
                       
                       {/* Item ID - Plain Text now */}
-                      <td className={`px-2 py-1 border border-slate-200 font-mono text-[11px] ${isDel ? 'text-gray-300 line-through' : 'text-slate-500'}`}>
+                      <td className={`px-2 py-1 border border-slate-200 font-mono text-[11px] ${isDel ? 'text-gray-300 line-through' : 'text-black font-bold'}`}>
                          {row.itemID}
                       </td>
 
@@ -509,9 +509,14 @@ const DataViewer: React.FC<DataViewerProps> = ({
                                     
                                     return (
                                         <div key={idx} className="px-3 py-2 hover:bg-blue-50/50 flex items-center justify-between text-xs font-mono group">
-                                            {/* Date + 2 spaces + Qty + 2 spaces + Store */}
+                                            {/* Date + Alias + Qty + Store */}
                                             <div className="flex items-center text-slate-600">
-                                                <span>{rec.date}</span>
+                                                <span className="text-red-600 font-bold">{rec.date}</span>
+                                                {rec.displayAlias && (
+                                                    <span className="ml-1 text-[10px] text-blue-600 font-bold bg-blue-50 px-1 rounded border border-blue-100">
+                                                        {rec.displayAlias}
+                                                    </span>
+                                                )}
                                                 <span className="w-2 inline-block"></span>
                                                 <span className="font-bold text-slate-800 w-6 text-center">{rec.quantity || '-'}</span>
                                                 <span className="w-2 inline-block"></span>

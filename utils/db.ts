@@ -1,6 +1,6 @@
 
 import Dexie, { Table } from 'dexie';
-import { StoreRecord } from '../types';
+import { StoreRecord, ProductGroup, GroupItem } from '../types';
 
 export interface HistoryRecord {
   id?: number;
@@ -10,6 +10,8 @@ export interface HistoryRecord {
   quantity: number; // Added quantity field
   storeName?: string; // New field for Branch separation
   salesPerson?: string; // New field for Sales Person
+  // Optional field for display purposes (not stored in DB, but returned by queries)
+  displayAlias?: string; 
 }
 
 export interface TemplateMapping {
@@ -48,39 +50,113 @@ export const db = new Dexie('SalesHistoryDB') as Dexie & {
   history: Table<HistoryRecord>;
   templates: Table<TemplateRecord>;
   stores: Table<StoreRecord>;
+  productGroups: Table<ProductGroup>;
 };
 
-// Update version to 4 to include stores table
-db.version(4).stores({
+// Update version to 5 to include productGroups table
+db.version(5).stores({
   history: '++id, [customerID+itemID], customerID, itemID, storeName',
   templates: '++id, name, updatedAt',
-  stores: '++id, &name' // Unique name
+  stores: '++id, &name',
+  productGroups: '++id, groupName'
 });
 
+// --- Product Group Helpers (In-Memory Cache for Performance) ---
+let groupCache: ProductGroup[] | null = null;
+let itemToGroupMap: Map<string, { group: ProductGroup, alias: string }> | null = null;
+
+export const refreshGroupCache = async () => {
+  const groups = await db.productGroups.toArray();
+  groupCache = groups;
+  itemToGroupMap = new Map();
+  
+  groups.forEach(g => {
+    g.items.forEach(item => {
+      // Key by trimmed ItemID
+      itemToGroupMap!.set(item.itemID.trim(), { group: g, alias: item.alias });
+    });
+  });
+};
+
+const ensureCache = async () => {
+  if (!groupCache) {
+    await refreshGroupCache();
+  }
+};
+
 /**
- * Check if a customer has bought an item before (Async)
- * This remains GLOBAL check (across all stores)
+ * Get all related ItemIDs for a given ItemID (including itself).
+ * Also returns the alias map for these items.
+ */
+const getRelatedItemsInfo = async (itemID: string) => {
+  await ensureCache();
+  const cleanID = itemID.trim();
+  const entry = itemToGroupMap?.get(cleanID);
+  
+  if (entry) {
+    // It belongs to a group, return all IDs in that group
+    const relatedIDs = entry.group.items.map(i => i.itemID);
+    const aliasMap: Record<string, string> = {};
+    entry.group.items.forEach(i => aliasMap[i.itemID] = i.alias);
+    return { relatedIDs, aliasMap };
+  }
+  
+  // No group, just return itself
+  return { relatedIDs: [cleanID], aliasMap: { [cleanID]: '' } };
+};
+
+/**
+ * Check if a customer has bought an item (or its related group items) before
  */
 export const checkRepurchase = async (customerID: string, itemID: string): Promise<boolean> => {
   if (!customerID || !itemID) return false;
-  // We check globally because a member ID is valid across all branches
-  const count = await db.history.where({ customerID, itemID }).count();
-  return count > 0;
+  
+  const { relatedIDs } = await getRelatedItemsInfo(itemID);
+
+  // If we have multiple IDs to check
+  if (relatedIDs.length > 1) {
+     // Check if customer bought ANY of these items
+     // Since history is indexed by customerID, we filter by it first
+     const count = await db.history
+        .where('customerID').equals(customerID)
+        .filter(rec => relatedIDs.includes(rec.itemID))
+        .count();
+     return count > 0;
+  } else {
+     // Standard single item check (Fastest)
+     const count = await db.history.where({ customerID, itemID }).count();
+     return count > 0;
+  }
 };
 
 /**
- * Get detailed history for a specific customer and item
+ * Get detailed history for a specific customer and item (AND related items in group)
  * Sorted by Date Descending (Newest first)
  */
 export const getItemHistory = async (customerID: string, itemID: string): Promise<HistoryRecord[]> => {
     if (!customerID || !itemID) return [];
     
-    // Dexie doesn't support complex sorting directly on compound index easily in one go with raw strings
-    // But since data volume per customer/item is small, we can filter then sort in memory or use Collection
-    const records = await db.history.where({ customerID, itemID }).toArray();
+    const { relatedIDs, aliasMap } = await getRelatedItemsInfo(itemID);
     
-    // Sort by Date Descending
-    return records.sort((a, b) => {
+    let records: HistoryRecord[] = [];
+
+    if (relatedIDs.length > 1) {
+        // Query all related items for this customer
+        records = await db.history
+            .where('customerID').equals(customerID)
+            .filter(rec => relatedIDs.includes(rec.itemID))
+            .toArray();
+    } else {
+        records = await db.history.where({ customerID, itemID }).toArray();
+    }
+    
+    // Sort by Date Descending and Attach Alias
+    return records
+      .map(r => ({
+          ...r,
+          displayAlias: aliasMap[r.itemID] || '' // Attach the alias
+      }))
+      .sort((a, b) => {
         if (a.date < b.date) return 1;
         if (a.date > b.date) return -1;
         return 0;
@@ -219,4 +295,26 @@ export const getTemplate = async (templateId: number = 1) => {
 
 export const deleteTemplate = async (templateId: number = 1) => {
   await db.templates.delete(templateId);
+};
+
+// --- Product Group Methods ---
+
+export const getProductGroups = async (): Promise<ProductGroup[]> => {
+  await ensureCache();
+  return groupCache || [];
+};
+
+export const addProductGroup = async (group: Omit<ProductGroup, 'id'>) => {
+  await db.productGroups.add(group);
+  await refreshGroupCache();
+};
+
+export const updateProductGroup = async (id: number, group: Omit<ProductGroup, 'id'>) => {
+  await db.productGroups.update(id, group);
+  await refreshGroupCache();
+};
+
+export const deleteProductGroup = async (id: number) => {
+  await db.productGroups.delete(id);
+  await refreshGroupCache();
 };
