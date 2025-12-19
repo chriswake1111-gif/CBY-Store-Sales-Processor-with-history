@@ -52,11 +52,9 @@ const App: React.FC = () => {
   const [rawSalesData, setRawSalesData] = useState<RawRow[]>([]);
   const [processedData, setProcessedData] = useState<ProcessedData>({});
   
-  // New States for Configuration
   const [repurchaseOptions, setRepurchaseOptions] = useState<RepurchaseOption[]>(DEFAULT_REPURCHASE_OPTIONS);
   const [staffMasterList, setStaffMasterList] = useState<StaffRecord[]>([]);
 
-  // Modals state
   const [staffRoles, setStaffRoles] = useState<Record<string, StaffRole>>({});
   const [isClassifying, setIsClassifying] = useState(false);
   const [pendingRawData, setPendingRawData] = useState<RawRow[] | null>(null);
@@ -77,19 +75,12 @@ const App: React.FC = () => {
   const [lastSaveTime, setLastSaveTime] = useState<number | null>(null);
   const [hasSavedData, setHasSavedData] = useState<boolean>(false);
   
-  // PWA States
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [isStandalone, setIsStandalone] = useState(false);
-  
   const stateRef = useRef({ exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList });
 
   useEffect(() => {
-    // Seed DB
     seedDefaultStores();
-    
     const ts = checkSavedData();
     if (ts) { setHasSavedData(true); setLastSaveTime(ts); }
-    // Initial Load of global configs if any
     const saved = loadFromLocal();
     if (saved) {
         if(saved.repurchaseOptions) setRepurchaseOptions(saved.repurchaseOptions);
@@ -100,9 +91,6 @@ const App: React.FC = () => {
   useEffect(() => {
     stateRef.current = { exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList };
   }, [exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList]);
-
-  // PWA & Install Handlers
-  // ... (existing logic)
 
   const handleManualSave = () => {
     const ts = saveToLocal(stateRef.current);
@@ -156,11 +144,9 @@ const App: React.FC = () => {
 
   const handleImportSales = async (file: File) => {
     if (!exclusionList.length || !rewardRules.length) return alert("請先匯入藥師點數與獎勵清單！");
-    
     if (rawSalesData.length > 0) {
       if (!window.confirm("匯入新報表將清除目前篩選進度，確定嗎？")) return;
     }
-
     setErrorMsg(null);
     try {
       const json = await readExcelFile(file);
@@ -169,55 +155,30 @@ const App: React.FC = () => {
         const p = row[COL_HEADERS.SALES_PERSON];
         if (p) people.add(String(p));
       });
-      
       if (people.size === 0) return alert("找不到銷售人員資料");
-
-      // LOGIC UPDATE: Check Master List First
       const newRoles: Record<string, StaffRole> = {};
       const unknownPeople: string[] = [];
-
       people.forEach(personName => {
          const master = staffMasterList.find(s => s.name === personName);
-         if (master) {
-             newRoles[personName] = master.role;
-         } else {
-             unknownPeople.push(personName);
-         }
+         if (master) newRoles[personName] = master.role;
+         else unknownPeople.push(personName);
       });
-
-      setRawSalesData([]); 
-      setProcessedData({});
-      setActivePerson('');
-      setSelectedPersons(new Set());
-      setPendingRawData(json);
-      setStaffRoles(newRoles);
-
-      if (unknownPeople.length > 0) {
-        setIsClassifying(true);
-      } else {
-        // All known, proceed directly
-        handleConfirmClassification(newRoles);
-      }
-
+      setRawSalesData([]); setProcessedData({}); setActivePerson(''); setSelectedPersons(new Set());
+      setPendingRawData(json); setStaffRoles(newRoles);
+      if (unknownPeople.length > 0) setIsClassifying(true);
+      else handleConfirmClassification(newRoles);
     } catch (e) { setErrorMsg("處理失敗: " + e); }
   };
 
   const handleConfirmClassification = async (updatedRoles: Record<string, StaffRole>) => {
     if (!pendingRawData) return;
-    
-    setIsClassifying(false);
-    setIsProcessing(true);
-    
-    // Merge known roles with newly decided roles
+    setIsClassifying(false); setIsProcessing(true);
     const finalRoles = { ...staffRoles, ...updatedRoles };
     setStaffRoles(finalRoles);
-    
     setTimeout(async () => {
         try {
           const grouped: ProcessedData = {};
-          const people = Object.keys(finalRoles); 
-          const peopleSet = new Set(people); 
-
+          const peopleSet = new Set(Object.keys(finalRoles)); 
           const rowsByPerson: Record<string, RawRow[]> = {};
           pendingRawData.forEach(row => {
             const p = String(row[COL_HEADERS.SALES_PERSON] || '');
@@ -226,56 +187,36 @@ const App: React.FC = () => {
               rowsByPerson[p].push(row);
             }
           });
-
           for (const person of Object.keys(rowsByPerson)) {
             const role = finalRoles[person] || 'SALES';
             if (role === 'NO_BONUS') continue;
-
             const personRows = rowsByPerson[person];
-            
             const pStage1 = await processStage1(personRows, exclusionList, role);
             const pStage2 = processStage2(personRows, rewardRules, role);
             let pStage3: Stage3Summary;
-            
-            if (role === 'PHARMACIST') {
-              pStage3 = { salesPerson: person, rows: [], total: 0 };
-            } else {
+            if (role === 'PHARMACIST') pStage3 = { salesPerson: person, rows: [], total: 0 };
+            else {
               const s3Summary = processStage3(personRows);
               pStage3 = s3Summary.length > 0 ? s3Summary[0] : { salesPerson: person, rows: generateEmptyStage3Rows(), total: 0 };
             }
-            
             grouped[person] = { role, stage1: pStage1, stage2: pStage2, stage3: pStage3 };
           }
-
-          setRawSalesData(pendingRawData);
-          setProcessedData(grouped);
+          setRawSalesData(pendingRawData); setProcessedData(grouped);
           setSelectedPersons(new Set(Object.keys(grouped)));
-          
           const sortedKeys = Object.keys(grouped).sort((a, b) => {
-            const roleA = grouped[a].role;
-            const roleB = grouped[b].role;
+            const roleA = grouped[a].role; const roleB = grouped[b].role;
             const pA = roleA === 'SALES' ? 1 : (roleA === 'PHARMACIST' ? 2 : 3);
             const pB = roleB === 'SALES' ? 1 : (roleB === 'PHARMACIST' ? 2 : 3);
             if (pA !== pB) return pA - pB;
             return a.localeCompare(b, 'zh-TW');
           });
-
           if (sortedKeys.length > 0) setActivePerson(sortedKeys[0]);
           setPendingRawData(null);
-          
-        } catch (e) { 
-          setErrorMsg("處理失敗: " + e); 
-          setPendingRawData(null);
-        } finally {
-            setIsProcessing(false);
-        }
+        } catch (e) { setErrorMsg("處理失敗: " + e); setPendingRawData(null); } finally { setIsProcessing(false); }
     }, 100);
   };
 
-  const handleCancelClassification = () => {
-    setIsClassifying(false);
-    setPendingRawData(null);
-  };
+  const handleCancelClassification = () => { setIsClassifying(false); setPendingRawData(null); };
 
   const handleExportClick = async () => {
     if (!selectedPersons.size) return alert("請選擇銷售人員");
@@ -285,12 +226,8 @@ const App: React.FC = () => {
 
   const setPersonData = (personId: string, transform: (p: ProcessedData[string]) => ProcessedData[string]) => {
     setProcessedData(prev => {
-      const personData = prev[personId];
-      if (!personData) return prev;
-      return {
-        ...prev,
-        [personId]: transform(personData)
-      };
+      const personData = prev[personId]; if (!personData) return prev;
+      return { ...prev, [personId]: transform(personData) };
     });
   };
 
@@ -310,9 +247,7 @@ const App: React.FC = () => {
       if (!activePerson) return;
       setPersonData(activePerson, (data) => ({
           ...data,
-          stage1: data.stage1.map(row =>
-              row.id === id ? { ...row, [field]: val } : row
-          )
+          stage1: data.stage1.map(row => row.id === id ? { ...row, [field]: val } : row)
       }));
   };
 
@@ -320,9 +255,7 @@ const App: React.FC = () => {
     if (!activePerson) return;
     setPersonData(activePerson, (data) => ({
       ...data,
-      stage2: data.stage2.map(row => 
-        row.id === id ? { ...row, isDeleted: !row.isDeleted } : row
-      )
+      stage2: data.stage2.map(row => row.id === id ? { ...row, isDeleted: !row.isDeleted } : row)
     }));
   };
 
@@ -330,16 +263,13 @@ const App: React.FC = () => {
     if (!activePerson) return;
     setPersonData(activePerson, (data) => ({
       ...data,
-      stage2: data.stage2.map(row => 
-        row.id === id ? { ...row, customReward: val === '' ? undefined : Number(val) } : row
-      )
+      stage2: data.stage2.map(row => row.id === id ? { ...row, customReward: val === '' ? undefined : Number(val) } : row)
     }));
   };
 
   const sortedPeople = useMemo(() => {
     return Object.keys(processedData).sort((a, b) => {
-       const roleA = processedData[a].role;
-       const roleB = processedData[b].role;
+       const roleA = processedData[a].role; const roleB = processedData[b].role;
        const pA = roleA === 'SALES' ? 1 : (roleA === 'PHARMACIST' ? 2 : 3);
        const pB = roleB === 'SALES' ? 1 : (roleB === 'PHARMACIST' ? 2 : 3);
        if (pA !== pB) return pA - pB;
@@ -351,17 +281,11 @@ const App: React.FC = () => {
      return Object.keys(processedData).filter(p => processedData[p].role !== 'NO_BONUS').sort();
   }, [processedData]);
 
-  const activeStaffRecord = useMemo(() => {
-     return staffMasterList.find(s => s.name === activePerson);
-  }, [staffMasterList, activePerson]);
-
+  const activeStaffRecord = useMemo(() => staffMasterList.find(s => s.name === activePerson), [staffMasterList, activePerson]);
   const currentData = useMemo(() => activePerson ? processedData[activePerson] : null, [processedData, activePerson]);
-  
   const stage1TotalPoints = useMemo(() => {
     return currentData?.stage1.reduce((sum, r) => {
-      if (r.status === Stage1Status.DEVELOP || r.status === Stage1Status.HALF_YEAR || r.status === Stage1Status.REPURCHASE) {
-        return sum + r.calculatedPoints;
-      }
+      if (r.status === Stage1Status.DEVELOP || r.status === Stage1Status.HALF_YEAR || r.status === Stage1Status.REPURCHASE) return sum + r.calculatedPoints;
       return sum;
     }, 0) || 0;
   }, [currentData]);
@@ -370,27 +294,19 @@ const App: React.FC = () => {
     sortedPeople, selectedPersons, togglePersonSelection: (p: string, e: any) => { e.stopPropagation(); const s = new Set(selectedPersons); s.has(p) ? s.delete(p) : s.add(p); setSelectedPersons(s); },
     activePerson, setActivePerson, currentData, activeTab, setActiveTab, stage1TotalPoints,
     handleStatusChangeStage1, handleToggleDeleteStage2, handleUpdateStage2CustomReward, onClose: isPopOut ? () => setIsPopOut(false) : undefined,
-    handleUpdateStage1Action2,
-    repurchaseOptions,
-    allActiveStaff,
-    staffRecord: activeStaffRecord
+    handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord: activeStaffRecord
   };
   
   const classificationNames = useMemo(() => {
     if (!pendingRawData) return [];
     const s = new Set<string>();
-    pendingRawData.forEach(r => {
-        const p = r[COL_HEADERS.SALES_PERSON];
-        if(p) s.add(String(p));
-    });
+    pendingRawData.forEach(r => { const p = r[COL_HEADERS.SALES_PERSON]; if(p) s.add(String(p)); });
     return Array.from(s).sort();
   }, [pendingRawData]);
 
   return (
     <>
       <div className="flex flex-col h-screen bg-slate-100 font-sans text-slate-900">
-        
-        {/* Header */}
         <div className="bg-slate-900 border-b border-slate-700 px-6 py-3 flex justify-between items-center shrink-0 z-40 text-white shadow-md">
           <div className="flex items-center gap-3">
              <div className="p-1.5 bg-blue-600 rounded text-white shadow-sm"><Activity size={18} /></div>
@@ -405,7 +321,7 @@ const App: React.FC = () => {
                   </button>
                 </h1>
                 <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v0.98</span>
+                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.0.1</span>
                     {lastSaveTime && <span className="flex items-center gap-1 border-l border-slate-700 pl-2"><Save size={10}/> {new Date(lastSaveTime).toLocaleTimeString()}</span>}
                 </div>
              </div>
@@ -417,53 +333,35 @@ const App: React.FC = () => {
              <button onClick={() => setShowStaffManager(true)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-blue-200 bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:text-white transition-colors font-medium rounded-sm">
                 <Users size={14}/> 員工職位設定
              </button>
-
-             <button 
-               onClick={handleManualSave} 
-               disabled={!rawSalesData.length || isProcessing} 
-               className="flex items-center gap-2 px-3 py-1.5 text-xs text-emerald-300 bg-slate-800 border border-emerald-800/50 hover:bg-slate-700 hover:text-emerald-200 transition-colors font-medium rounded-sm disabled:opacity-30 disabled:cursor-not-allowed"
-             >
+             <button onClick={handleManualSave} disabled={!rawSalesData.length || isProcessing} className="flex items-center gap-2 px-3 py-1.5 text-xs text-emerald-300 bg-slate-800 border border-emerald-800/50 hover:bg-slate-700 hover:text-emerald-200 transition-colors font-medium rounded-sm disabled:opacity-30">
                <Save size={14}/> 儲存
              </button>
              {hasSavedData && (
-                <button 
-                  onClick={handleLoadSave} 
-                  disabled={isProcessing}
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs text-amber-300 bg-slate-800 border border-amber-800/50 hover:bg-slate-700 hover:text-amber-200 transition-colors font-medium rounded-sm disabled:opacity-30"
-                >
+                <button onClick={handleLoadSave} disabled={isProcessing} className="flex items-center gap-2 px-3 py-1.5 text-xs text-amber-300 bg-slate-800 border border-amber-800/50 hover:bg-slate-700 hover:text-amber-200 transition-colors font-medium rounded-sm disabled:opacity-30">
                   <FolderOpen size={14} /> 讀取
                 </button>
              )}
-             
-             <button onClick={() => setShowExportSettings(true)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:text-white transition-colors font-medium rounded-sm disabled:opacity-30">
+             <button onClick={() => setShowExportSettings(true)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:text-white transition-colors font-medium rounded-sm">
                <Settings size={14}/> 匯出設定
              </button>
-             
              <button onClick={() => setIsPopOut(true)} disabled={!Object.keys(processedData).length} className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:text-white transition-colors font-medium rounded-sm disabled:opacity-30"><Maximize2 size={14}/> 視窗</button>
-             <button onClick={handleExportClick} disabled={!Object.keys(processedData).length} className="flex items-center gap-2 px-4 py-1.5 text-xs bg-blue-700 text-white border border-blue-600 hover:bg-blue-600 hover:border-blue-500 rounded-sm disabled:bg-slate-800 disabled:border-slate-700 disabled:text-slate-600 transition-colors font-bold shadow-sm"><Download size={14} /> 匯出報表</button>
+             <button onClick={handleExportClick} disabled={!Object.keys(processedData).length} className="flex items-center gap-2 px-4 py-1.5 text-xs bg-blue-700 text-white border border-blue-600 hover:bg-blue-600 hover:border-blue-500 rounded-sm disabled:bg-slate-800 transition-colors font-bold shadow-sm"><Download size={14} /> 匯出報表</button>
           </div>
         </div>
-
-        {/* Input Grid */}
         <div className="px-4 py-3 grid grid-cols-1 md:grid-cols-3 gap-3 shrink-0 w-full border-b border-gray-200 bg-white">
             <FileUploader label="1. 藥師點數清單" onFileSelect={handleImportExclusion} isLoaded={exclusionList.length > 0} icon="list" disabled={isProcessing} />
             <FileUploader label="2. 現金獎勵表" onFileSelect={handleImportRewards} isLoaded={rewardRules.length > 0} icon="dollar" disabled={isProcessing} />
             <FileUploader label="3. 銷售報表" onFileSelect={handleImportSales} disabled={!exclusionList.length || !rewardRules.length || isProcessing} isLoaded={rawSalesData.length > 0} icon="file" />
         </div>
-
         {errorMsg && (
             <div className="mx-4 mt-2 p-2 bg-red-100 border border-red-300 text-red-800 flex items-center gap-2 text-sm font-bold">
-                <AlertCircle size={16} />
-                <span>{errorMsg}</span>
+                <AlertCircle size={16} /> <span>{errorMsg}</span>
             </div>
         )}
-
-        {/* Main Data View */}
         {isProcessing ? (
            <div className="flex-1 flex flex-col items-center justify-center text-blue-600 bg-white">
                <Loader2 size={48} className="animate-spin mb-4" />
                <p className="text-lg font-bold">正在比對歷史資料...</p>
-               <p className="text-sm text-gray-400 mt-2">請稍候，系統正在查詢資料庫</p>
            </div>
         ) : sortedPeople.length > 0 ? (
            <div className="flex-1 overflow-hidden p-4">
@@ -476,32 +374,21 @@ const App: React.FC = () => {
                 <FileSpreadsheet size={64} className="mb-4 text-slate-200" />
                 <p className="text-lg font-bold text-slate-400">等待資料匯入...</p>
                 <div className="flex gap-4 mt-8">
-                     <button onClick={() => setShowHistory(true)} className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-500 rounded hover:bg-slate-200 hover:text-slate-700 transition-colors font-bold text-sm">
+                     <button onClick={() => setShowHistory(true)} className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-500 rounded hover:bg-slate-200 font-bold text-sm">
                         <Database size={16}/> 管理歷史資料庫
                      </button>
-                     <button onClick={() => setShowStaffManager(true)} className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-500 rounded hover:bg-slate-200 hover:text-slate-700 transition-colors font-bold text-sm">
+                     <button onClick={() => setShowStaffManager(true)} className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-500 rounded hover:bg-slate-200 font-bold text-sm">
                         <Users size={16}/> 預設員工職位
                      </button>
                 </div>
             </div>
         )}
       </div>
-      
       {isPopOut && <PopoutWindow title="結果預覽" onClose={() => setIsPopOut(false)}><DataViewer {...dvProps} /></PopoutWindow>}
-      
-      {isClassifying && (
-        <StaffClassificationModal 
-            names={classificationNames} 
-            initialRoles={staffRoles}
-            onConfirm={handleConfirmClassification}
-            onCancel={handleCancelClassification}
-        />
-      )}
-
+      {isClassifying && <StaffClassificationModal names={classificationNames} initialRoles={staffRoles} onConfirm={handleConfirmClassification} onCancel={handleCancelClassification} />}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
       {showHistory && <HistoryManager onClose={() => setShowHistory(false)} />}
       {showExportSettings && <ExportSettingsModal onClose={() => setShowExportSettings(false)} />}
-      
       {showRepurchaseSettings && <RepurchaseSettingsModal options={repurchaseOptions} onSave={(opts) => { setRepurchaseOptions(opts); setShowRepurchaseSettings(false); }} onClose={() => setShowRepurchaseSettings(false)} />}
       {showStaffManager && <StaffManagerModal staffList={staffMasterList} onSave={(list) => { setStaffMasterList(list); setShowStaffManager(false); }} onClose={() => setShowStaffManager(false)} />}
     </>

@@ -1,6 +1,6 @@
 
 // Service Worker for PWA with Network-First Strategy for HTML
-const CACHE_NAME = 'sales-processor-v0.99'; // Bump version to force update
+const CACHE_NAME = 'sales-processor-v1.0.1'; // Bump version to force update
 const urlsToCache = [
   '/',
   '/index.html',
@@ -28,7 +28,7 @@ self.addEventListener('activate', (event) => {
   // Tell the active service worker to take control of the page immediately
   event.waitUntil(clients.claim());
   
-  // Cleanup old caches
+  // Cleanup old caches - This is critical for users to see updates
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
