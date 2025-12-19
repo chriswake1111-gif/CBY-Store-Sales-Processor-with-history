@@ -64,6 +64,13 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
     setLocalList(prev => [{ id: '', name: '', role: 'SALES' }, ...prev]);
   };
 
+  const handleClearAll = () => {
+    if (localList.length === 0) return;
+    if (window.confirm("確定要清空目前列表中的所有員工資料嗎？\n此動作將移除列表中的所有人員，方便您重新匯入。")) {
+        setLocalList([]);
+    }
+  };
+
   const updateRow = (idx: number, field: keyof StaffRecord, value: any) => {
     setLocalList(prev => {
        const next = [...prev];
@@ -95,6 +102,9 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
                 </label>
                 <button onClick={addRow} className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 text-slate-700 rounded hover:bg-blue-50 hover:text-blue-600 transition-colors shadow-sm text-sm font-bold">
                     <Plus size={16} /> 新增人員
+                </button>
+                <button onClick={handleClearAll} className="flex items-center gap-2 px-3 py-2 bg-white border border-red-300 text-red-600 rounded hover:bg-red-50 hover:text-red-700 transition-colors shadow-sm text-sm font-bold">
+                    <Trash2 size={16} /> 全部清空
                 </button>
             </div>
             <input 

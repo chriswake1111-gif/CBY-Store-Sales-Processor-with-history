@@ -173,8 +173,8 @@ const processStage1Pharmacist = async (rawData: RawRow[], exclusionList: Exclusi
     // --- ASYNC HISTORY CHECK ---
     let status = Stage1Status.DEVELOP;
     
-    // Only check repurchase if we actually have a customer ID
-    if (hasCid) {
+    // Only check repurchase if we actually have a customer ID AND it is NOT '調劑點數'
+    if (hasCid && category !== '調劑點數') {
         const isRepurchase = await checkRepurchase(cid, itemID);
         if (isRepurchase) {
             status = Stage1Status.REPURCHASE;
