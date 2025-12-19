@@ -2,10 +2,10 @@
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { ProcessedData, Stage1Status, Stage1Row } from '../types';
-import { getTemplate } from './db';
-import { recalculateStage1Points } from './processor'; // Import calculator
+import { getTemplate, TEMPLATE_IDS, TemplateRecord, TemplateMapping } from './db';
+import { recalculateStage1Points } from './processor';
 
-// Helper for reading input files (Keep using XLSX for reading as it is robust)
+// Helper for reading input files
 export const readExcelFile = (file: File): Promise<any[]> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -36,25 +36,27 @@ const sanitizeSheetName = (name: string): string => name.replace(/[\[\]\:\*\?\/\
 // --- EXPORT LOGIC WITH EXCELJS ---
 
 export const exportToExcel = async (processedData: ProcessedData, defaultFilename: string, selectedPersons: Set<string>) => {
-  // 1. Check for Template
-  const templateRecord = await getTemplate();
-  const workbook = new ExcelJS.Workbook();
-  let useTemplate = false;
-  let config = templateRecord?.config;
+  // 1. Load All Templates
+  const salesTmpl = await getTemplate(TEMPLATE_IDS.SALES);
+  const pharmTmpl = await getTemplate(TEMPLATE_IDS.PHARMACIST);
+  const repTmpl = await getTemplate(TEMPLATE_IDS.REPURCHASE);
 
-  if (templateRecord && templateRecord.data) {
-    try {
-      await workbook.xlsx.load(templateRecord.data);
-      useTemplate = true;
-    } catch (e) {
-      console.error("Failed to load template", e);
-      useTemplate = false;
-    }
-  }
+  // Pre-load Template Workbooks to access their sheets later
+  const loadTmplWB = async (tmpl: TemplateRecord | undefined) => {
+      if (!tmpl || !tmpl.data) return null;
+      try {
+          const wb = new ExcelJS.Workbook();
+          await wb.xlsx.load(tmpl.data);
+          return wb;
+      } catch (e) { console.error("Tmpl load fail", e); return null; }
+  };
 
-  // Get the Master Sheet (if template exists)
-  const masterSheet = useTemplate ? workbook.worksheets[0] : null;
-  
+  const salesWB = await loadTmplWB(salesTmpl);
+  const pharmWB = await loadTmplWB(pharmTmpl);
+  const repWB = await loadTmplWB(repTmpl);
+
+  const outWorkbook = new ExcelJS.Workbook();
+
   // Sort Logic: SALES (1) -> PHARMACIST (2) -> OTHERS (3), then by Name
   const sortedPersons = Object.keys(processedData).sort((a, b) => {
     const roleA = processedData[a].role;
@@ -66,86 +68,58 @@ export const exportToExcel = async (processedData: ProcessedData, defaultFilenam
     return a.localeCompare(b, 'zh-TW');
   });
 
-  const addedSheets: string[] = [];
-
+  // --- 1. STAFF SHEETS ---
   for (const person of sortedPersons) {
     if (!selectedPersons.has(person)) continue;
     const data = processedData[person];
     if (data.role === 'NO_BONUS') continue;
 
-    let sheet: ExcelJS.Worksheet;
     const sheetName = sanitizeSheetName(person);
+    
+    // Determine which template to use
+    let tmplRecord: TemplateRecord | undefined;
+    let tmplSourceSheet: ExcelJS.Worksheet | undefined;
 
-    if (masterSheet) {
-        sheet = workbook.addWorksheet(sheetName);
-        
-        // Copy Page Setup
-        sheet.pageSetup = { ...masterSheet.pageSetup };
-        
-        // Copy Columns (Widths)
-        if (masterSheet.columns) {
-            sheet.columns = masterSheet.columns.map(col => ({ 
-                header: col.header, key: col.key, width: col.width, style: col.style 
-            }));
-        }
+    if (data.role === 'PHARMACIST') {
+        tmplRecord = pharmTmpl;
+        tmplSourceSheet = pharmWB?.worksheets[0];
+    } else {
+        tmplRecord = salesTmpl;
+        tmplSourceSheet = salesWB?.worksheets[0];
+    }
 
-        // Copy content from master sheet (Header areas)
-        const copyLimit = config ? (config.startRow - 1) : (masterSheet.rowCount);
+    let sheet: ExcelJS.Worksheet;
 
-        masterSheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
-            if (rowNumber > copyLimit && config) return; 
-
-            const newRow = sheet.getRow(rowNumber);
-            newRow.values = row.values;
-            newRow.height = row.height;
-            // TS Fix: Cast to any because 'style' property might be missing in type definition but exists at runtime
-            (newRow as any).style = (row as any).style;
-            
-            row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-                const newCell = newRow.getCell(colNumber);
-                newCell.style = cell.style;
-                newCell.value = cell.value;
-            });
-            newRow.commit();
-        });
-
-        // Copy Merges
-        const merges = (masterSheet as any)._merges; 
-        if (merges) {
-            Object.keys(merges).forEach(merge => {
-                try { sheet.mergeCells(merge); } catch (e) {}
-            });
-        }
-
+    if (tmplSourceSheet) {
+        // Create sheet and attempt to copy styles
+        sheet = outWorkbook.addWorksheet(sheetName);
+        copySheetModel(tmplSourceSheet, sheet);
     } else {
         // No Template: Create basic sheet
-        sheet = workbook.addWorksheet(sheetName);
+        sheet = outWorkbook.addWorksheet(sheetName);
         sheet.columns = [
             { width: 18 }, { width: 12 }, { width: 15 }, { width: 15 }, { width: 30 }, { width: 10 }, { width: 12 }, { width: 25 }, { width: 15 }
         ];
     }
-    
-    addedSheets.push(sheetName);
 
-    // --- WRITE DATA LOGIC ---
-    
-    // CASE A: TEMPLATE + MAPPING CONFIG USED
-    if (useTemplate && config) {
-        let currentRow = config.startRow;
+    // --- WRITE DATA (Logic branching for Template vs No Template) ---
+    const config = tmplRecord?.config;
+
+    if (config) {
+        // TEMPLATE MODE
+        let currentRow = config.startRow || 2;
         
         const put = (col: string | undefined, val: any) => {
             if (!col) return;
             const cell = sheet.getCell(`${col}${currentRow}`);
             cell.value = val;
             
-            if (masterSheet) {
-               const templateCell = masterSheet.getCell(`${col}${config!.startRow}`);
+            // Re-apply style from template row if exists (helps if adding many rows)
+            if (tmplSourceSheet) {
+               const tmplRowIdx = config.startRow || 2;
+               const templateCell = tmplSourceSheet.getCell(`${col}${tmplRowIdx}`);
                if (templateCell) {
-                   cell.style = { ...templateCell.style };
-                   if (templateCell.border) cell.border = templateCell.border;
-                   if (templateCell.font) cell.font = templateCell.font;
-                   if (templateCell.alignment) cell.alignment = templateCell.alignment;
-                   if (templateCell.numFmt) cell.numFmt = templateCell.numFmt;
+                   applyCellStyle(cell, templateCell);
                }
             }
         };
@@ -192,29 +166,19 @@ export const exportToExcel = async (processedData: ProcessedData, defaultFilenam
                 addSimpleRow(["", "自費調劑獎金", "", `${bonus}元`]);
              }
         }
-        
     } else {
-        // CASE B: NO MAPPING (DEFAULT APPEND LOGIC)
-        
-        let startRow = masterSheet ? (masterSheet.rowCount + 2) : 1;
+        // NO TEMPLATE MODE (Default Layout)
+        let startRow = 1;
         const addRow = (values: any[], isHeader = false, isSectionTitle = false) => {
             const row = sheet.getRow(startRow++);
             row.values = values;
-            
             if (isSectionTitle) {
                 row.font = { bold: true, size: 12, color: { argb: 'FF000000' } };
                 row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } }; 
-                sheet.mergeCells(startRow - 1, 1, startRow - 1, 9);
             } else if (isHeader) {
                 row.font = { bold: true, color: { argb: 'FFFFFFFF' } };
                 row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF475569' } };
                 row.alignment = { horizontal: 'center' };
-            } else {
-                row.font = { size: 11 };
-                row.border = {
-                    top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-                    bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-                };
             }
             row.commit();
         };
@@ -240,14 +204,13 @@ export const exportToExcel = async (processedData: ProcessedData, defaultFilenam
             addRow([
                 safeVal(row.category), safeVal(row.date), safeVal(row.customerID),
                 safeVal(row.itemID), safeVal(row.itemName), safeVal(row.quantity),
-                safeVal(row.amount), 
-                safeVal(note), safeVal(pts)
+                safeVal(row.amount), safeVal(note), safeVal(pts)
             ]);
         });
         
         startRow++; 
 
-        // STAGE 2 & 3
+        // STAGE 2 & 3 (Same legacy logic...)
         if (data.role === 'PHARMACIST') {
             addRow([`【第二階段：當月調劑件數】`], false, true);
             addRow(["品項編號", "品名", "數量"], true);
@@ -255,7 +218,6 @@ export const exportToExcel = async (processedData: ProcessedData, defaultFilenam
                 const label = row.itemID === '001727' ? '件' : '組';
                 addRow([safeVal(row.itemID), safeVal(row.itemName), `${safeVal(row.quantity)}${label}`]);
             });
-            
             const dispensingQty = data.stage2.find(r => r.itemID === '001727')?.quantity || 0;
             const bonus = Math.max(0, (dispensingQty - 300) * 10);
             addRow(["自費調劑獎金", "", `${bonus}元`]);
@@ -272,9 +234,7 @@ export const exportToExcel = async (processedData: ProcessedData, defaultFilenam
             }, { cash: 0, vouchers: 0 });
 
             addRow([`【第二階段：現金獎勵表】 現金$${s2Totals.cash.toLocaleString()} 禮券${s2Totals.vouchers}張`], false, true);
-            
             addRow(["類別", "日期", "客戶編號", "品項編號", "品名", "數量", "備註", "獎勵"], true);
-            
             data.stage2.forEach(row => {
                 if (row.isDeleted) return;
                 let rewardDisplay = "";
@@ -301,8 +261,7 @@ export const exportToExcel = async (processedData: ProcessedData, defaultFilenam
     }
   }
 
-  // Handle Repurchase Sheet (Global)
-  // Gather data
+  // --- 2. REPURCHASE SHEET (GLOBAL) ---
   const repurchaseMap: Record<string, { role: string, rows: Stage1Row[], totalPoints: number }> = {};
   for (const person of sortedPersons) {
      if (!selectedPersons.has(person)) continue;
@@ -317,63 +276,104 @@ export const exportToExcel = async (processedData: ProcessedData, defaultFilenam
   }
 
   if (Object.keys(repurchaseMap).length > 0) {
-      const repSheet = workbook.addWorksheet("回購總表");
-      // Added two extra columns: Original Developer, Developer Points
-      repSheet.columns = [
-        { width: 25 }, { width: 10 }, { width: 12 }, { width: 12 }, { width: 25 }, { width: 8 }, { width: 10 }, { width: 15 }, { width: 10 }
-      ];
+      const repSheetName = "回購總表";
+      let repSheet: ExcelJS.Worksheet;
+      const repSourceSheet = repWB?.worksheets[0];
+      const repConfig = repTmpl?.config;
 
-      let rRow = 1;
-      const addRepRow = (values: any[], style: 'header' | 'title' | 'data') => {
-          const row = repSheet.getRow(rRow++);
-          row.values = values;
-          if (style === 'title') {
-              row.font = { bold: true, size: 12 };
-              row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBAF' } };
-          } else if (style === 'header') {
-              row.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-              row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEA580C' } };
-          }
-      };
+      if (repSourceSheet) {
+          repSheet = outWorkbook.addWorksheet(repSheetName);
+          copySheetModel(repSourceSheet, repSheet);
+      } else {
+          repSheet = outWorkbook.addWorksheet(repSheetName);
+          repSheet.columns = [
+            { width: 25 }, { width: 10 }, { width: 12 }, { width: 12 }, { width: 25 }, { width: 8 }, { width: 10 }, { width: 15 }, { width: 10 }
+          ];
+      }
 
-      Object.keys(repurchaseMap).sort().forEach(person => {
-          const group = repurchaseMap[person];
-          addRepRow([`${person}    回購總點數：${group.totalPoints}`], 'title');
-          addRepRow(["分類", "日期", "客戶編號", "品項編號", "品名", "數量", "回購點數", "原開發者", "開發點數"], 'header');
+      // WRITE REPURCHASE DATA
+      if (repConfig) {
+          // Template Mode
+          let currentRow = repConfig.startRow || 2;
           
-          group.rows.forEach(row => {
-              // 1. Calculate Full Points (as if it was DEVELOP)
-              // We use the imported processor logic to handle Milk/Nutrient qty division correctly
-              const fullPoints = recalculateStage1Points(
-                  { ...row, status: Stage1Status.DEVELOP }, 
-                  group.role as any
-              );
+          Object.keys(repurchaseMap).sort().forEach(person => {
+              const group = repurchaseMap[person];
+              // Optional: Add Header Row for Person if needed, but template usually just wants raw rows. 
+              // If user wants groupings, they have to check manually or we assume raw list.
+              // For simplicity, we just list all rows. 
               
-              // 2. Developer Points = Full - Repurchase (Calculated)
-              // This naturally handles the "Developer gets the odd point" logic
-              // e.g., 11 pts -> Repurchase gets floor(5.5)=5. Dev gets 11-5=6.
-              const devPoints = fullPoints - row.calculatedPoints;
+              group.rows.forEach(row => {
+                 const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, group.role as any);
+                 const devPoints = fullPoints - row.calculatedPoints;
+                 const showDev = row.originalDeveloper && row.originalDeveloper !== '無';
+                 
+                 const put = (col: string | undefined, val: any) => {
+                    if (!col) return;
+                    const cell = repSheet.getCell(`${col}${currentRow}`);
+                    cell.value = val;
+                    if (repSourceSheet) {
+                        const templateCell = repSourceSheet.getCell(`${col}${repConfig.startRow || 2}`);
+                        if (templateCell) applyCellStyle(cell, templateCell);
+                    }
+                 };
 
-              // 3. Determine if we show Developer info
-              const showDev = row.originalDeveloper && row.originalDeveloper !== '無';
-              
-              addRepRow([
-                  safeVal(row.category), safeVal(row.date), safeVal(row.customerID),
-                  safeVal(row.itemID), safeVal(row.itemName), safeVal(row.quantity),
-                  safeVal(row.calculatedPoints),
-                  showDev ? safeVal(row.originalDeveloper) : '',
-                  showDev ? safeVal(devPoints) : ''
-              ], 'data');
+                 // Map Person Name somewhere? Usually Category Col A in non-template mode. 
+                 // If template mode, maybe we put Person Name in 'Category' or Note? 
+                 // Let's assume standard mapping:
+                 put(repConfig.category, person); // Reuse Category Col for Sales Person Name
+                 put(repConfig.date, safeVal(row.date));
+                 put(repConfig.customerID, safeVal(row.customerID));
+                 put(repConfig.itemID, safeVal(row.itemID));
+                 put(repConfig.itemName, safeVal(row.itemName));
+                 put(repConfig.quantity, safeVal(row.quantity));
+                 put(repConfig.repurchasePoints, safeVal(row.calculatedPoints));
+                 put(repConfig.originalDeveloper, showDev ? safeVal(row.originalDeveloper) : '');
+                 put(repConfig.devPoints, showDev ? safeVal(devPoints) : '');
+                 
+                 currentRow++;
+              });
+              // Add spacer row?
+              currentRow++;
           });
-          rRow++;
-      });
+      } else {
+          // Default Mode
+          let rRow = 1;
+          const addRepRow = (values: any[], style: 'header' | 'title' | 'data') => {
+              const row = repSheet.getRow(rRow++);
+              row.values = values;
+              if (style === 'title') {
+                  row.font = { bold: true, size: 12 };
+                  row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBAF' } };
+              } else if (style === 'header') {
+                  row.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+                  row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEA580C' } };
+              }
+          };
+
+          Object.keys(repurchaseMap).sort().forEach(person => {
+              const group = repurchaseMap[person];
+              addRepRow([`${person}    回購總點數：${group.totalPoints}`], 'title');
+              addRepRow(["分類", "日期", "客戶編號", "品項編號", "品名", "數量", "回購點數", "原開發者", "開發點數"], 'header');
+              
+              group.rows.forEach(row => {
+                  const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, group.role as any);
+                  const devPoints = fullPoints - row.calculatedPoints;
+                  const showDev = row.originalDeveloper && row.originalDeveloper !== '無';
+                  
+                  addRepRow([
+                      safeVal(row.category), safeVal(row.date), safeVal(row.customerID),
+                      safeVal(row.itemID), safeVal(row.itemName), safeVal(row.quantity),
+                      safeVal(row.calculatedPoints),
+                      showDev ? safeVal(row.originalDeveloper) : '',
+                      showDev ? safeVal(devPoints) : ''
+                  ], 'data');
+              });
+              rRow++;
+          });
+      }
   }
 
-  if (useTemplate && masterSheet && addedSheets.length > 0) {
-      workbook.removeWorksheet(masterSheet.id);
-  }
-
-  const buffer = await workbook.xlsx.writeBuffer();
+  const buffer = await outWorkbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url = window.URL.createObjectURL(blob);
   const anchor = document.createElement('a');
@@ -382,3 +382,44 @@ export const exportToExcel = async (processedData: ProcessedData, defaultFilenam
   anchor.click();
   window.URL.revokeObjectURL(url);
 };
+
+// Helper: Copy Sheet Structure (Columns, Merges, Styles)
+function copySheetModel(source: ExcelJS.Worksheet, target: ExcelJS.Worksheet) {
+    if (source.columns) {
+        target.columns = source.columns.map(col => ({ 
+            header: col.header, key: col.key, width: col.width, style: col.style 
+        }));
+    }
+    
+    // Copy Page Setup
+    target.pageSetup = { ...source.pageSetup };
+    
+    // Copy Header Rows (approx first 10 rows just in case)
+    source.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+        if (rowNumber > 20) return; // Limit header copy range
+        const newRow = target.getRow(rowNumber);
+        newRow.height = row.height;
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+             const newCell = newRow.getCell(colNumber);
+             newCell.value = cell.value;
+             applyCellStyle(newCell, cell);
+        });
+    });
+
+    // Copy Merges (Crude attempt, might fail if ranges overlap in weird ways but usually fine for templates)
+    const merges = (source as any)._merges;
+    if (merges) {
+        Object.keys(merges).forEach(merge => {
+            try { target.mergeCells(merge); } catch (e) {}
+        });
+    }
+}
+
+function applyCellStyle(target: ExcelJS.Cell, source: ExcelJS.Cell) {
+   target.style = { ...source.style };
+   if (source.border) target.border = JSON.parse(JSON.stringify(source.border));
+   if (source.font) target.font = JSON.parse(JSON.stringify(source.font));
+   if (source.alignment) target.alignment = JSON.parse(JSON.stringify(source.alignment));
+   if (source.fill) target.fill = JSON.parse(JSON.stringify(source.fill));
+   if (source.numFmt) target.numFmt = source.numFmt;
+}

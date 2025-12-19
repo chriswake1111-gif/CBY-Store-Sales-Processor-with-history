@@ -334,8 +334,8 @@ const App: React.FC = () => {
                   </button>
                 </h1>
                 <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.0.5</span>
-                    {lastSaveTime && <span className="flex items-center gap-1 border-l border-slate-700 pl-2"><Save size={10}/> {new Date(lastSaveTime).toLocaleTimeString()</span>}
+                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.0.6</span>
+                    {lastSaveTime && <span className="flex items-center gap-1 border-l border-slate-700 pl-2"><Save size={10}/> {new Date(lastSaveTime).toLocaleTimeString()}</span>}
                 </div>
              </div>
           </div>

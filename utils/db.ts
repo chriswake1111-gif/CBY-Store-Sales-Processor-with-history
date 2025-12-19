@@ -23,15 +23,25 @@ export interface TemplateMapping {
   amount: string; 
   note: string;
   points: string;
+  // New fields for Repurchase Summary
+  originalDeveloper?: string;
+  devPoints?: string;
+  repurchasePoints?: string;
 }
 
 export interface TemplateRecord {
-  id?: number;
+  id?: number; // 1: Sales, 2: Pharmacist, 3: Repurchase
   name: string;
   data: ArrayBuffer;
   config?: TemplateMapping; 
   updatedAt: number;
 }
+
+export const TEMPLATE_IDS = {
+  SALES: 1,
+  PHARMACIST: 2,
+  REPURCHASE: 3
+};
 
 // Use direct instantiation
 export const db = new Dexie('SalesHistoryDB') as Dexie & {
@@ -179,13 +189,16 @@ export const deleteStoreHistory = async (storeName: string) => {
 
 // --- Template Methods ---
 
-export const saveTemplate = async (file: File) => {
+/**
+ * Save template by specific ID (1: Sales, 2: Pharm, 3: Repurchase)
+ */
+export const saveTemplate = async (file: File, templateId: number = 1) => {
   const buffer = await file.arrayBuffer();
   // Try to keep existing config if updating file
-  const existing = await db.templates.get(1);
+  const existing = await db.templates.get(templateId);
   
   await db.templates.put({
-    id: 1,
+    id: templateId,
     name: file.name,
     data: buffer,
     config: existing?.config, // Preserve config
@@ -193,17 +206,17 @@ export const saveTemplate = async (file: File) => {
   });
 };
 
-export const saveTemplateConfig = async (config: TemplateMapping) => {
-  const existing = await db.templates.get(1);
+export const saveTemplateConfig = async (config: TemplateMapping, templateId: number = 1) => {
+  const existing = await db.templates.get(templateId);
   if (existing) {
-    await db.templates.update(1, { config });
+    await db.templates.update(templateId, { config });
   }
 };
 
-export const getTemplate = async () => {
-  return await db.templates.get(1);
+export const getTemplate = async (templateId: number = 1) => {
+  return await db.templates.get(templateId);
 };
 
-export const deleteTemplate = async () => {
-  await db.templates.delete(1);
+export const deleteTemplate = async (templateId: number = 1) => {
+  await db.templates.delete(templateId);
 };
