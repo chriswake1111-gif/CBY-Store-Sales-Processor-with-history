@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Database, Trash2, Upload, AlertTriangle, HardDrive, RefreshCw, X, Store, PieChart, CheckCircle2, Settings, Plus, Save, Edit2, Calendar, ChevronRight } from 'lucide-react';
-import { getHistoryCount, clearHistory, bulkAddHistory, HistoryRecord, getHistoryStatsByStore, deleteStoreHistory, getStores, addStore, updateStore, deleteStore, getAvailableYearsByStore, deleteHistoryByYear, getStoreHistorySignatures } from '../utils/db';
+import { getHistoryCount, clearHistory, bulkAddHistory, HistoryRecord, getHistoryStatsByStore, deleteStoreHistory, getStores, addStore, updateStore, deleteStore, getAvailableYearsByStore, deleteHistoryByYear } from '../utils/db';
 import { readExcelFile } from '../utils/excelHelper';
 import { COL_HEADERS } from '../constants';
 import { StoreRecord } from '../types';
@@ -179,22 +179,19 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
     setIsProcessing(true);
     setProgress(0);
     setMessageType('info');
-    setMessage(`正在讀取檔案並檢查重複資料...`);
+    setMessage(`正在讀取檔案並匯入至「${targetStore}」...`);
 
     try {
       const json = await readExcelFile(file);
       setTotalRows(json.length);
       
-      const storeName = targetStore.trim();
-
-      // 1. Fetch Existing Signatures for Duplicate Detection
-      const existingSignatures = await getStoreHistorySignatures(storeName);
-      
       let processed = 0;
-      let skippedInvalid = 0;
-      let skippedDuplicate = 0;
+      let skipped = 0;
       let buffer: HistoryRecord[] = [];
       
+      // Get current store name from state reference at start of process
+      const storeName = targetStore.trim();
+
       for (let i = 0; i < json.length; i++) {
         const row = json[i] as any;
         const cid = String(row[COL_HEADERS.CUSTOMER_ID] || '').trim();
@@ -208,28 +205,19 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
           // Fix: Use Sales Date if available, otherwise fallback to Ticket No ('單號')
           const dateStr = String(row[COL_HEADERS.SALES_DATE] || row[COL_HEADERS.TICKET_NO] || '').trim();
           
-          // Duplicate Check Signature: CID | ItemID | Date
-          const signature = `${cid}|${itemID}|${dateStr}`;
-          
-          if (existingSignatures.has(signature)) {
-            skippedDuplicate++;
-          } else {
-            // Only add if not duplicate
-            const salesPerson = String(row[COL_HEADERS.SALES_PERSON] || '').trim();
+          // Get Sales Person
+          const salesPerson = String(row[COL_HEADERS.SALES_PERSON] || '').trim();
 
-            buffer.push({
-                customerID: cid,
-                itemID: itemID,
-                date: dateStr,
-                quantity: qty,
-                storeName: storeName,
-                salesPerson: salesPerson
-            });
-            // Update local signature set to prevent duplicates within the same file too
-            existingSignatures.add(signature);
-          }
+          buffer.push({
+            customerID: cid,
+            itemID: itemID,
+            date: dateStr,
+            quantity: qty,
+            storeName: storeName,
+            salesPerson: salesPerson
+          });
         } else {
-            skippedInvalid++;
+            skipped++;
         }
 
         if (buffer.length >= CHUNK_SIZE || i === json.length - 1) {
@@ -245,14 +233,8 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
       }
 
       await refreshStats();
-      
-      let msg = `匯入完成！成功新增：${processed.toLocaleString()} 筆`;
-      if (skippedDuplicate > 0) msg += `，已略過重複：${skippedDuplicate.toLocaleString()} 筆`;
-      if (skippedInvalid > 0) msg += `，無效/散客：${skippedInvalid.toLocaleString()} 筆`;
-
-      setMessage(msg);
-      setMessageType(processed > 0 ? 'success' : (skippedDuplicate > 0 ? 'info' : 'error'));
-
+      setMessage(`匯入完成！成功：${processed.toLocaleString()} 筆，略過無效/散客資料：${skipped.toLocaleString()} 筆`);
+      setMessageType('success');
     } catch (err: any) {
       setMessage(`匯入失敗: ${err.message}`);
       setMessageType('error');

@@ -77,20 +77,6 @@ export const getItemHistory = async (customerID: string, itemID: string): Promis
     });
 };
 
-/**
- * Get existing signatures for a store to prevent duplicate imports.
- * Signature format: `${customerID}|${itemID}|${date}`
- */
-export const getStoreHistorySignatures = async (storeName: string): Promise<Set<string>> => {
-  const records = await db.history.where('storeName').equals(storeName).toArray();
-  const signatures = new Set<string>();
-  records.forEach(r => {
-    // Create a unique fingerprint for the transaction
-    signatures.add(`${r.customerID}|${r.itemID}|${r.date}`);
-  });
-  return signatures;
-};
-
 export const bulkAddHistory = async (records: HistoryRecord[]) => {
   await db.history.bulkAdd(records);
 };
