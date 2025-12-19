@@ -323,12 +323,12 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
                         <div className="flex flex-wrap gap-2">
                             {availableStores.map(store => (
                                 <div key={store.id} className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-gray-200 shadow-sm text-sm">
-                                    {editingStore?.id === store.id ? (
+                                    {editingStore && editingStore.id === store.id ? (
                                         <>
                                             <input 
                                                 autoFocus
                                                 value={editingStore.name} 
-                                                onChange={e => setEditingStore({...editingStore, name: e.target.value})}
+                                                onChange={e => setEditingStore({ id: editingStore.id, name: e.target.value })}
                                                 className="w-20 px-1 py-0 text-xs border-b border-blue-400 outline-none"
                                             />
                                             <button onClick={handleUpdateStore} className="text-green-600"><Save size={14}/></button>
