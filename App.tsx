@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { RawRow, ExclusionItem, RewardRule, ProcessedData, Stage1Status, StaffRole, Stage3Summary, RepurchaseOption, StaffRecord } from './types';
 import { readExcelFile, exportToExcel } from './utils/excelHelper';
@@ -333,7 +334,7 @@ const App: React.FC = () => {
                   </button>
                 </h1>
                 <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.0.2</span>
+                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.0.3</span>
                     {lastSaveTime && <span className="flex items-center gap-1 border-l border-slate-700 pl-2"><Save size={10}/> {new Date(lastSaveTime).toLocaleTimeString()}</span>}
                 </div>
              </div>
