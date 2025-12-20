@@ -101,7 +101,16 @@ db.version(5).stores({
 
 // --- Product Group Helpers (In-Memory Cache for Performance) ---
 let groupCache: ProductGroup[] | null = null;
+// Maps Normalized ID -> Group Info
 let itemToGroupMap: Map<string, { group: ProductGroup, alias: string }> | null = null;
+
+/**
+ * Remove leading zeros from an ID string.
+ * e.g., "00123" -> "123", "123" -> "123", "00A1" -> "A1"
+ */
+const normalizeID = (id: string | number): string => {
+  return String(id).trim().replace(/^0+/, '');
+};
 
 export const refreshGroupCache = async () => {
   const groups = await db.productGroups.toArray();
@@ -110,8 +119,9 @@ export const refreshGroupCache = async () => {
   
   groups.forEach(g => {
     g.items.forEach(item => {
-      // Key by trimmed ItemID
-      itemToGroupMap!.set(String(item.itemID).trim(), { group: g, alias: item.alias });
+      // Key by Normalized ID to support 00123 vs 123 matching
+      const normID = normalizeID(item.itemID);
+      itemToGroupMap!.set(normID, { group: g, alias: item.alias });
     });
   });
 };
@@ -123,24 +133,26 @@ const ensureCache = async () => {
 };
 
 /**
- * Get all related ItemIDs for a given ItemID (including itself).
- * Also returns the alias map for these items.
+ * Get all related Normalized ItemIDs for a given ItemID.
+ * Also returns the alias map for these items (keyed by Normalized ID).
  */
 const getRelatedItemsInfo = async (itemID: string) => {
   await ensureCache();
-  const cleanID = String(itemID).trim();
-  const entry = itemToGroupMap?.get(cleanID);
+  const normID = normalizeID(itemID);
+  const entry = itemToGroupMap?.get(normID);
   
   if (entry) {
-    // It belongs to a group, return all IDs in that group
-    const relatedIDs = entry.group.items.map(i => String(i.itemID).trim());
+    // It belongs to a group, return all Normalized IDs in that group
+    const relatedIDs = entry.group.items.map(i => normalizeID(i.itemID));
     const aliasMap: Record<string, string> = {};
-    entry.group.items.forEach(i => aliasMap[String(i.itemID).trim()] = i.alias);
+    entry.group.items.forEach(i => {
+        aliasMap[normalizeID(i.itemID)] = i.alias;
+    });
     return { relatedIDs, aliasMap };
   }
   
-  // No group, just return itself
-  return { relatedIDs: [cleanID], aliasMap: { [cleanID]: '' } };
+  // No group, just return itself (normalized)
+  return { relatedIDs: [normID], aliasMap: { [normID]: '' } };
 };
 
 /**
@@ -151,20 +163,14 @@ export const checkRepurchase = async (customerID: string, itemID: string): Promi
   
   const { relatedIDs } = await getRelatedItemsInfo(itemID);
 
-  // If we have multiple IDs to check
-  if (relatedIDs.length > 1) {
-     // Check if customer bought ANY of these items
-     // Since history is indexed by customerID, we filter by it first
-     const count = await db.history
-        .where('customerID').equals(customerID)
-        .filter(rec => relatedIDs.includes(String(rec.itemID).trim()))
-        .count();
-     return count > 0;
-  } else {
-     // Standard single item check (Fastest)
-     const count = await db.history.where({ customerID, itemID }).count();
-     return count > 0;
-  }
+  // We query by CustomerID first (indexed, fast)
+  // Then we filter in memory by normalizing the DB record's ItemID
+  const count = await db.history
+    .where('customerID').equals(customerID)
+    .filter(rec => relatedIDs.includes(normalizeID(rec.itemID)))
+    .count();
+    
+  return count > 0;
 };
 
 /**
@@ -176,23 +182,18 @@ export const getItemHistory = async (customerID: string, itemID: string): Promis
     
     const { relatedIDs, aliasMap } = await getRelatedItemsInfo(itemID);
     
-    let records: HistoryRecord[] = [];
-
-    if (relatedIDs.length > 1) {
-        // Query all related items for this customer
-        records = await db.history
-            .where('customerID').equals(customerID)
-            .filter(rec => relatedIDs.includes(String(rec.itemID).trim()))
-            .toArray();
-    } else {
-        records = await db.history.where({ customerID, itemID }).toArray();
-    }
+    // Query by CustomerID
+    const records = await db.history
+        .where('customerID').equals(customerID)
+        .filter(rec => relatedIDs.includes(normalizeID(rec.itemID)))
+        .toArray();
     
     // Sort by Date Descending and Attach Alias
     return records
       .map(r => ({
           ...r,
-          displayAlias: aliasMap[String(r.itemID).trim()] || '' // Attach the alias safely handling whitespace
+          // Use normalized ID to lookup alias
+          displayAlias: aliasMap[normalizeID(r.itemID)] || '' 
       }))
       .sort((a, b) => {
         if (a.date < b.date) return 1;
