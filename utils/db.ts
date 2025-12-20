@@ -16,6 +16,7 @@ export interface HistoryRecord {
 
 export interface TemplateMapping {
   startRow: number;
+  // Stage 1: List Columns
   category: string;
   date: string;
   customerID: string;
@@ -25,10 +26,47 @@ export interface TemplateMapping {
   amount: string; 
   note: string;
   points: string;
-  // New fields for Repurchase Summary
+  
+  // Stage 2: Reward List Columns (New)
+  reward_category?: string;
+  reward_date?: string;
+  reward_customerID?: string;
+  reward_itemID?: string;
+  reward_itemName?: string;
+  reward_quantity?: string;
+  reward_note?: string;
+  reward_amount?: string;
+
+  // Repurchase List Columns
   originalDeveloper?: string;
   devPoints?: string;
   repurchasePoints?: string;
+  
+  // --- New Statistical Cells (Coordinates like "A1", "D5") ---
+  // Points Section
+  cell_pointsStd?: string;       // 點數標準
+  cell_pointsTotal?: string;     // 總計 (Blank)
+  cell_pointsDev?: string;       // 個人開發
+  cell_pointsTableDev?: string;  // 總表開發
+  cell_pointsRep?: string;       // 總表回購
+  cell_pointsMilkDev?: string;   // 奶粉開發 (Blank)
+
+  // Cosmetic Section
+  cell_cosmeticStd?: string;     // 美妝標準
+  cell_cosmeticTotal?: string;   // 美妝總計
+  cell_amtLrp?: string;          // 理膚
+  cell_amtCerave?: string;       // 適樂膚
+  cell_amtDrSatin?: string;      // Dr.Satin
+  cell_amtCetaphil?: string;     // 舒特膚
+  cell_amtFlora?: string;        // 芙樂思
+  cell_amtEmployee?: string;     // 員購 (Blank)
+
+  // Rewards Section
+  cell_rewardCash?: string;      // 現金獎勵
+  cell_rewardMilk?: string;      // 小兒奶粉 (Blank)
+  cell_reward711?: string;       // 7-11 禮卷
+  cell_rewardFamily?: string;    // 全家 禮卷
+  cell_rewardPx?: string;        // 全聯 禮卷
 }
 
 export interface TemplateRecord {

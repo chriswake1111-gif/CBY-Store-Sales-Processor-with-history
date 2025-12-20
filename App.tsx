@@ -98,11 +98,9 @@ const App: React.FC = () => {
           for (let registration of registrations) {
             registration.unregister();
           }
-          // Removed the deprecated 'true' argument as reload() expects no arguments.
           window.location.reload();
         });
       } else {
-        // Removed the deprecated 'true' argument as reload() expects no arguments.
         window.location.reload();
       }
     }
@@ -236,7 +234,7 @@ const App: React.FC = () => {
   const handleExportClick = async () => {
     if (!selectedPersons.size) return alert("請選擇銷售人員");
     const defaultFilename = `獎金計算報表_${new Date().toISOString().slice(0,10)}`;
-    await exportToExcel(processedData, defaultFilename, selectedPersons);
+    await exportToExcel(processedData, defaultFilename, selectedPersons, staffMasterList);
   };
 
   const setPersonData = (personId: string, transform: (p: ProcessedData[string]) => ProcessedData[string]) => {
@@ -328,12 +326,17 @@ const App: React.FC = () => {
              <div>
                 <h1 className="text-lg font-bold tracking-wide flex items-center gap-2">
                   分店獎金計算系統 
-                  <button onClick={() => setShowHelp(true)} className="text-slate-400 hover:text-white transition-colors" title="使用說明">
-                    <HelpCircle size={18} />
-                  </button>
-                  <button onClick={() => setShowHistory(true)} className="text-blue-300 hover:text-white transition-colors ml-1" title="歷史資料庫">
-                    <Database size={18} />
-                  </button>
+                  <div className="flex items-center gap-1.5 ml-1">
+                    <button onClick={() => setShowHelp(true)} className="text-slate-400 hover:text-white transition-colors" title="使用說明">
+                      <HelpCircle size={18} />
+                    </button>
+                    <button onClick={() => setShowHistory(true)} className="text-blue-300 hover:text-white transition-colors" title="歷史資料庫">
+                      <Database size={18} />
+                    </button>
+                    <button onClick={handleForceRefresh} className="text-red-300 hover:text-white transition-colors" title="強制重新整理 (清除快取)">
+                      <RefreshCcw size={16}/>
+                    </button>
+                  </div>
                 </h1>
                 <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
                     <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.0.8</span>
@@ -342,9 +345,6 @@ const App: React.FC = () => {
              </div>
           </div>
           <div className="flex gap-2">
-             <button onClick={handleForceRefresh} className="flex items-center gap-2 px-3 py-1.5 text-xs text-red-200 bg-slate-800 border border-red-900/30 hover:bg-red-950 hover:text-white transition-colors font-medium rounded-sm" title="若版本號未更新，請按此強制更新">
-                <RefreshCcw size={14}/> 強制重新整理
-             </button>
              <button onClick={() => setShowProductGroups(true)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-purple-200 bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:text-white transition-colors font-medium rounded-sm">
                 <Layers size={14}/> 商品群組
              </button>
