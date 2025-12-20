@@ -111,7 +111,7 @@ export const refreshGroupCache = async () => {
   groups.forEach(g => {
     g.items.forEach(item => {
       // Key by trimmed ItemID
-      itemToGroupMap!.set(item.itemID.trim(), { group: g, alias: item.alias });
+      itemToGroupMap!.set(String(item.itemID).trim(), { group: g, alias: item.alias });
     });
   });
 };
@@ -128,14 +128,14 @@ const ensureCache = async () => {
  */
 const getRelatedItemsInfo = async (itemID: string) => {
   await ensureCache();
-  const cleanID = itemID.trim();
+  const cleanID = String(itemID).trim();
   const entry = itemToGroupMap?.get(cleanID);
   
   if (entry) {
     // It belongs to a group, return all IDs in that group
-    const relatedIDs = entry.group.items.map(i => i.itemID);
+    const relatedIDs = entry.group.items.map(i => String(i.itemID).trim());
     const aliasMap: Record<string, string> = {};
-    entry.group.items.forEach(i => aliasMap[i.itemID] = i.alias);
+    entry.group.items.forEach(i => aliasMap[String(i.itemID).trim()] = i.alias);
     return { relatedIDs, aliasMap };
   }
   
@@ -157,7 +157,7 @@ export const checkRepurchase = async (customerID: string, itemID: string): Promi
      // Since history is indexed by customerID, we filter by it first
      const count = await db.history
         .where('customerID').equals(customerID)
-        .filter(rec => relatedIDs.includes(rec.itemID))
+        .filter(rec => relatedIDs.includes(String(rec.itemID).trim()))
         .count();
      return count > 0;
   } else {
@@ -182,7 +182,7 @@ export const getItemHistory = async (customerID: string, itemID: string): Promis
         // Query all related items for this customer
         records = await db.history
             .where('customerID').equals(customerID)
-            .filter(rec => relatedIDs.includes(rec.itemID))
+            .filter(rec => relatedIDs.includes(String(rec.itemID).trim()))
             .toArray();
     } else {
         records = await db.history.where({ customerID, itemID }).toArray();
@@ -192,7 +192,7 @@ export const getItemHistory = async (customerID: string, itemID: string): Promis
     return records
       .map(r => ({
           ...r,
-          displayAlias: aliasMap[r.itemID] || '' // Attach the alias
+          displayAlias: aliasMap[String(r.itemID).trim()] || '' // Attach the alias safely handling whitespace
       }))
       .sort((a, b) => {
         if (a.date < b.date) return 1;
