@@ -7,7 +7,13 @@ export interface RewardRule {
   itemID: string; note: string; category: string; reward: number; rewardLabel: string; format: string;
 }
 
-export enum Stage1Status { DEVELOP = '開發', HALF_YEAR = '隔半年', REPURCHASE = '回購', DELETE = '刪除' }
+export enum Stage1Status { 
+  DEVELOP = '開發', 
+  HALF_YEAR = '隔半年', 
+  REPURCHASE = '回購', 
+  DELETE = '刪除',
+  RETURN = '退貨' // New Status
+}
 
 export type StaffRole = 'SALES' | 'PHARMACIST' | 'NO_BONUS';
 
@@ -18,6 +24,9 @@ export interface Stage1Row {
   // New Fields for Repurchase Logic
   originalDeveloper?: string; 
   repurchaseType?: string;
+  
+  // New Fields for Return Logic
+  returnTarget?: string; // The "Original Seller" who receives the penalty
   
   category: string; status: Stage1Status; raw: RawRow;
 }

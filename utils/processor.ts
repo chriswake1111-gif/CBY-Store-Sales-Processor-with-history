@@ -32,10 +32,15 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
     const cid = getVal(row, COL_HEADERS.CUSTOMER_ID);
     if (!cid || cid === 'undefined') continue;
 
-    if (getNum(row, COL_HEADERS.DEBT) > 0) continue;
+    const debt = getNum(row, COL_HEADERS.DEBT);
+    // Note: Negative quantity (return) might come with negative debt or 0 debt, we process returns regardless of debt check if QTY < 0
+    const qty = getNum(row, COL_HEADERS.QUANTITY);
+    const isReturn = qty < 0;
+
+    if (!isReturn && debt > 0) continue;
     
     const points = getNum(row, COL_HEADERS.POINTS) || getNum(row, '點數');
-    if (points === 0) continue;
+    if (points === 0 && !isReturn) continue; // Allow return to proceed even if points is 0 (though unlikely)
 
     if (getNum(row, COL_HEADERS.UNIT_PRICE) === 0) continue;
 
@@ -47,7 +52,6 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
     if (dispensingItemIDs.has(itemID)) continue;
 
     const rawPoints = points;
-    const qty = getNum(row, COL_HEADERS.QUANTITY);
     
     // Extract new fields
     const amount = getNum(row, COL_HEADERS.SUBTOTAL);
@@ -62,13 +66,28 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
         category = '嬰幼兒米麥精';
       }
     }
+
+    // Special handling for Returns
+    if (isReturn) {
+        category = '退換貨';
+    }
     
     let calculatedPoints = 0;
     if (category === '現金-小兒銷售') {
         calculatedPoints = 0;
     } else {
         const isDividedByQty = category === '成人奶粉' || category === '成人奶水' || category === '嬰幼兒米麥精';
-        calculatedPoints = isDividedByQty ? Math.floor(rawPoints / (qty || 1)) : rawPoints;
+        // For returns, we still divide if needed, but floor of negative number handles differently
+        // e.g. -5 / 2 = -2.5 -> floor is -3. But we usually want symmetric. 
+        // Use trunc for symmetric division towards zero, then apply manual logic if needed.
+        if (isDividedByQty) {
+             const absPts = Math.abs(rawPoints);
+             const absQty = Math.abs(qty || 1);
+             const ptsPerItem = Math.floor(absPts / absQty);
+             calculatedPoints = isReturn ? -ptsPerItem : ptsPerItem;
+        } else {
+             calculatedPoints = rawPoints;
+        }
     }
 
     const ticketNo = getStr(row, COL_HEADERS.TICKET_NO);
@@ -76,8 +95,10 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
     
     // --- ASYNC HISTORY CHECK ---
     let status = Stage1Status.DEVELOP;
-    // Only check repurchase if it's a valid point item and not excluded
-    if (calculatedPoints > 0 || category === '現金-小兒銷售') {
+
+    if (isReturn) {
+        status = Stage1Status.RETURN;
+    } else if (calculatedPoints > 0 || category === '現金-小兒銷售') {
        const isRepurchase = await checkRepurchase(cid, itemID);
        if (isRepurchase) {
           status = Stage1Status.REPURCHASE;
@@ -102,7 +123,7 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
       originalPoints: rawPoints,
       calculatedPoints,
       category,
-      status, // Set by DB check
+      status, 
       raw: row
     });
   }
@@ -117,15 +138,17 @@ const processStage1Pharmacist = async (rawData: RawRow[], exclusionList: Exclusi
   const processed: Stage1Row[] = [];
 
   for (const row of rawData) {
-    // 1. Basic Checks (Move up Debt and Point checks before CID check)
-    if (getNum(row, COL_HEADERS.DEBT) > 0) continue;
+    const qty = getNum(row, COL_HEADERS.QUANTITY);
+    const isReturn = qty < 0;
+    const debt = getNum(row, COL_HEADERS.DEBT);
+
+    if (!isReturn && debt > 0) continue;
 
     const points = getNum(row, COL_HEADERS.POINTS) || getNum(row, '點數');
-    if (points === 0) continue;
+    if (points === 0 && !isReturn) continue;
 
     const itemID = getStr(row, COL_HEADERS.ITEM_ID);
     const cat1 = getStr(row, COL_HEADERS.CAT_1);
-    const qty = getNum(row, COL_HEADERS.QUANTITY);
     const itemName = getVal(row, COL_HEADERS.ITEM_NAME) || getVal(row, '品名') || '';
     const ticketNo = getStr(row, COL_HEADERS.TICKET_NO);
     const dateStr = ticketNo.length >= 7 ? ticketNo.substring(5, 7) : '??';
@@ -142,7 +165,13 @@ const processStage1Pharmacist = async (rawData: RawRow[], exclusionList: Exclusi
     if (cat1 === '05-1') {
       isMatch = true;
       category = '成人奶粉';
-      calculatedPoints = Math.floor(points / (qty || 1));
+      if (isReturn) {
+         const absPts = Math.abs(points);
+         const absQty = Math.abs(qty || 1);
+         calculatedPoints = -Math.floor(absPts / absQty);
+      } else {
+         calculatedPoints = Math.floor(points / (qty || 1));
+      }
     }
     else if (pharmListMap.has(itemID)) {
       const listCat = pharmListMap.get(itemID);
@@ -159,22 +188,29 @@ const processStage1Pharmacist = async (rawData: RawRow[], exclusionList: Exclusi
 
     if (!isMatch) continue;
 
+    if (isReturn) category = '退換貨';
+
     // 3. Conditional CID Filter based on Category
     const rawCid = getVal(row, COL_HEADERS.CUSTOMER_ID);
     const hasCid = rawCid && rawCid !== 'undefined' && String(rawCid).trim() !== '';
 
     // Rule: '調劑點數' keeps empty CID. Others ('成人奶粉', '其他') must have CID.
-    if (category !== '調劑點數' && !hasCid) {
+    if (category !== '調劑點數' && category !== '退換貨' && !hasCid) {
         continue;
     }
+    // Return requires CID usually? Let's assume yes unless it was dispensing
+    if (category === '退換貨' && !hasCid) {
+         // Relaxed check for returns, but ideally returns have CIDs
+    }
 
-    const cid = hasCid ? rawCid : ''; // Use empty string for display if no CID (for dispensing)
+    const cid = hasCid ? rawCid : ''; 
 
     // --- ASYNC HISTORY CHECK ---
     let status = Stage1Status.DEVELOP;
     
-    // Only check repurchase if we actually have a customer ID AND it is NOT '調劑點數'
-    if (hasCid && category !== '調劑點數') {
+    if (isReturn) {
+        status = Stage1Status.RETURN;
+    } else if (hasCid && category !== '調劑點數') {
         const isRepurchase = await checkRepurchase(cid, itemID);
         if (isRepurchase) {
             status = Stage1Status.REPURCHASE;
@@ -203,7 +239,7 @@ const processStage1Pharmacist = async (rawData: RawRow[], exclusionList: Exclusi
     });
   }
 
-  const sortOrder: Record<string, number> = { '成人奶粉': 1, '其他': 2, '調劑點數': 3 };
+  const sortOrder: Record<string, number> = { '成人奶粉': 1, '其他': 2, '調劑點數': 3, '退換貨': 999 };
   
   return processed.sort((a, b) => {
     const oa = sortOrder[a.category] ?? 99;
@@ -230,6 +266,54 @@ export const recalculateStage1Points = (row: Stage1Row, role: StaffRole = 'SALES
       base = Number(row.raw?.[COL_HEADERS.POINTS] || row.raw?.['點數'] || 0);
   }
 
+  // Handle Return Logic
+  if (row.status === Stage1Status.RETURN) {
+      // Logic:
+      // 1. If no Original Developer is selected: Original Seller takes full hit.
+      // 2. If Original Developer IS selected: 
+      //    - Points split 50/50.
+      //    - If Odd, Developer takes the extra -1.
+      
+      const hasDev = row.originalDeveloper && row.originalDeveloper !== '無';
+      const isNegative = base < 0; // Should be true for returns
+      
+      // Calculate Base Value for Single Unit logic (same as normal)
+      let calculatedBase = base;
+      const isDividedByQty = row.category !== '退換貨' && (
+          (role === 'PHARMACIST' && row.category === '成人奶粉') ||
+          (role === 'SALES' && (row.category === '成人奶粉' || row.category === '成人奶水' || row.category === '嬰幼兒米麥精'))
+      );
+
+      if (isDividedByQty) {
+           const absBase = Math.abs(base);
+           const absQty = Math.abs(row.quantity || 1);
+           calculatedBase = isNegative ? -Math.floor(absBase / absQty) : Math.floor(absBase / absQty);
+      }
+      
+      // If it's a return row processed by default logic above, 'calculatedPoints' might already be set.
+      // But here we enforce the split logic.
+      
+      if (!hasDev) {
+          return calculatedBase; // Full deduction
+      } else {
+          // Shared deduction
+          // Logic: Dev gets "more" deduction if odd.
+          // e.g. -3. Dev: -2, Seller: -1.
+          // This function returns the value for the *current row context*. 
+          // If this row is in the "Repurchase Table" context (Dev), it returns full.
+          // If this row is in "Sales Table" context (Seller), it returns the 50% share.
+          
+          // Actually, this function is usually called to determine what to display in the main list (Seller's list).
+          // In Seller's list, we show the Seller's share.
+          
+          // Seller Share = Math.ceil(calculatedBase / 2) ? 
+          // -3 / 2 = -1.5. ceil is -1. floor is -2.
+          // Seller should get -1. So Math.ceil works for negative numbers to get the "smaller" magnitude.
+          return Math.ceil(calculatedBase / 2);
+      }
+  }
+
+  // Normal Logic
   if (role === 'PHARMACIST') {
     if (row.category === '調劑點數') return base; 
     
@@ -276,7 +360,11 @@ const processStage2Sales = (rawData: RawRow[], rewardRules: RewardRule[]): Stage
     const cid = getVal(row, COL_HEADERS.CUSTOMER_ID);
     if (!cid || cid === 'undefined') continue;
     if (getNum(row, COL_HEADERS.UNIT_PRICE) === 0) continue;
-    if (getNum(row, COL_HEADERS.DEBT) > 0) continue;
+    
+    // Allow returns in Stage 2 (negative quantity)
+    const qty = getNum(row, COL_HEADERS.QUANTITY);
+    const debt = getNum(row, COL_HEADERS.DEBT);
+    if (qty >= 0 && debt > 0) continue;
 
     const cat1 = getStr(row, COL_HEADERS.CAT_1);
     const unit = getStr(row, COL_HEADERS.UNIT);
@@ -294,7 +382,7 @@ const processStage2Sales = (rawData: RawRow[], rewardRules: RewardRule[]): Stage
       customerName: getVal(row, COL_HEADERS.CUSTOMER_NAME),
       itemID,
       itemName: getVal(row, COL_HEADERS.ITEM_NAME) || getVal(row, '品名') || '',
-      quantity: getNum(row, COL_HEADERS.QUANTITY),
+      quantity: qty,
       category: rule.category,
       note: rule.note,
       reward: rule.reward,
@@ -329,7 +417,7 @@ const processStage2Pharmacist = (rawData: RawRow[]): Stage2Row[] => {
 
   const results: Stage2Row[] = [];
   
-  if (qty1727 > 0) {
+  if (qty1727 > 0 || qty1727 < 0) { // Allow negative
     results.push({
       id: uuidv4(),
       salesPerson: person,
@@ -349,7 +437,7 @@ const processStage2Pharmacist = (rawData: RawRow[]): Stage2Row[] => {
     });
   }
 
-  if (qty1345 > 0) {
+  if (qty1345 > 0 || qty1345 < 0) {
     results.push({
       id: uuidv4(),
       salesPerson: person,

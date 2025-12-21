@@ -256,11 +256,18 @@ const App: React.FC = () => {
     }));
   };
   
-  const handleUpdateStage1Action2 = (id: string, field: 'originalDeveloper' | 'repurchaseType', val: string) => {
+  // Updated to include 'returnTarget'
+  const handleUpdateStage1Action2 = (id: string, field: 'originalDeveloper' | 'repurchaseType' | 'returnTarget', val: string) => {
       if (!activePerson) return;
       setPersonData(activePerson, (data) => ({
           ...data,
-          stage1: data.stage1.map(row => row.id === id ? { ...row, [field]: val } : row)
+          stage1: data.stage1.map(row => {
+             if (row.id !== id) return row;
+             const updated = { ...row, [field]: val };
+             // If changing return target or developer, recalculate points
+             updated.calculatedPoints = recalculateStage1Points(updated, data.role);
+             return updated;
+          })
       }));
   };
 
@@ -296,18 +303,58 @@ const App: React.FC = () => {
 
   const activeStaffRecord = useMemo(() => staffMasterList.find(s => s.name === activePerson), [staffMasterList, activePerson]);
   const currentData = useMemo(() => activePerson ? processedData[activePerson] : null, [processedData, activePerson]);
+  
+  // Modified Stage 1 Total Points to handle "Incoming" and "Outgoing" returns
   const stage1TotalPoints = useMemo(() => {
-    return currentData?.stage1.reduce((sum, r) => {
-      if (r.status === Stage1Status.DEVELOP || r.status === Stage1Status.HALF_YEAR || r.status === Stage1Status.REPURCHASE) return sum + r.calculatedPoints;
+    if (!currentData || !activePerson) return 0;
+    
+    // 1. Calculate Own Points (Excluding Outgoing Returns)
+    const ownPoints = currentData.stage1.reduce((sum, r) => {
+      // If marked as RETURN and has a target OTHER than self (should theoretically not happen as we don't move records), 
+      // but conceptually: if returnTarget is set, it means it's "transferred out"
+      if (r.status === Stage1Status.RETURN && r.returnTarget) {
+          return sum; // Exclude from local sum
+      }
+      
+      if (r.status === Stage1Status.DEVELOP || r.status === Stage1Status.HALF_YEAR || r.status === Stage1Status.REPURCHASE || r.status === Stage1Status.RETURN) {
+         return sum + r.calculatedPoints;
+      }
       return sum;
-    }, 0) || 0;
-  }, [currentData]);
+    }, 0);
+
+    // 2. Add Incoming Returns (From other people targeting me)
+    let incomingPoints = 0;
+    Object.keys(processedData).forEach(otherPerson => {
+        if (otherPerson === activePerson) return;
+        processedData[otherPerson].stage1.forEach(r => {
+            if (r.status === Stage1Status.RETURN && r.returnTarget === activePerson) {
+                // Re-calculate context for ME (the target)
+                // If I am the target, I take the hit. Logic is handled in recalculateStage1Points context usually.
+                // But recalculateStage1Points returns the deduction for the *row owner*.
+                // If row owner (Original Seller) is ME (target), the logic holds. 
+                // Wait, the row owner currently is the 'Processor' (otherPerson).
+                // We need the value that *I* should deduct.
+                // If I am the Original Seller (returnTarget), I take the full hit or 50% depending on Developer.
+                
+                // Reuse logic:
+                // If dev is selected, split. If dev is me? If dev is 3rd party?
+                // Standard Logic: Original Seller (Me) gets 50% or 100%.
+                const points = recalculateStage1Points(r, processedData[otherPerson].role);
+                incomingPoints += points;
+            }
+        });
+    });
+
+    return ownPoints + incomingPoints;
+  }, [currentData, processedData, activePerson]);
 
   const dvProps = {
     sortedPeople, selectedPersons, togglePersonSelection: (p: string, e: any) => { e.stopPropagation(); const s = new Set(selectedPersons); s.has(p) ? s.delete(p) : s.add(p); setSelectedPersons(s); },
     activePerson, setActivePerson, currentData, activeTab, setActiveTab, stage1TotalPoints,
     handleStatusChangeStage1, handleToggleDeleteStage2, handleUpdateStage2CustomReward, onClose: isPopOut ? () => setIsPopOut(false) : undefined,
-    handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord: activeStaffRecord
+    handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord: activeStaffRecord,
+    // Pass full data for "Incoming Return" calculation in DataViewer
+    fullProcessedData: processedData 
   };
   
   const classificationNames = useMemo(() => {
@@ -339,7 +386,7 @@ const App: React.FC = () => {
                   </div>
                 </h1>
                 <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.0.8</span>
+                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.1.0</span>
                     {lastSaveTime && <span className="flex items-center gap-1 border-l border-slate-700 pl-2"><Save size={10}/> {new Date(lastSaveTime).toLocaleTimeString()}</span>}
                 </div>
              </div>

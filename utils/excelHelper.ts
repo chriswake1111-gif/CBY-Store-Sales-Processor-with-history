@@ -115,6 +115,26 @@ export const exportToExcel = async (
             { width: 18 }, { width: 12 }, { width: 15 }, { width: 15 }, { width: 30 }, { width: 10 }, { width: 12 }, { width: 25 }, { width: 15 }
         ];
     }
+    
+    // GATHER DATA: COMBINE OWN DATA WITH INCOMING RETURNS
+    // 1. Filter Own Data: Exclude Deleted AND Outgoing Returns
+    const finalStage1 = data.stage1.filter(row => {
+         if (row.status === Stage1Status.DELETE) return false;
+         // Exclude outgoing returns (where I am source, but target is set)
+         if (row.status === Stage1Status.RETURN && row.returnTarget) return false;
+         return true;
+    });
+
+    // 2. Add Incoming Returns (From Others)
+    Object.keys(processedData).forEach(otherPerson => {
+        if (otherPerson === person) return;
+        processedData[otherPerson].stage1.forEach(row => {
+            if (row.status === Stage1Status.RETURN && row.returnTarget === person) {
+                finalStage1.push(row);
+            }
+        });
+    });
+
 
     // --- WRITE DATA (Logic branching for Template vs No Template) ---
     if (config) {
@@ -127,17 +147,22 @@ export const exportToExcel = async (
         // Check if we have specific cell mappings and process them first (Fixed Layout)
         if (data.role !== 'PHARMACIST') {
             
-            // Calculate Stats
+            // Calculate Stats based on FINAL STAGE 1 (including injected returns)
             // A. Points
-            const pointsDev = data.stage1.reduce((acc, row) => {
-                // "個人開發" = Develop + Half Year (Excluding Repurchase, Excluding Delete)
-                if (row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR) {
-                    return acc + row.calculatedPoints;
+            const pointsDev = finalStage1.reduce((acc, row) => {
+                // "個人開發" = Develop + Half Year + Return (Calculated points already handled)
+                if (row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR || row.status === Stage1Status.RETURN) {
+                    // For injected returns, we need to recalculate context? 
+                    // recalculateStage1Points uses row status and handles splitting.
+                    // IMPORTANT: If row is incoming return, the `recalculateStage1Points` logic might check dev.
+                    // We need to ensure correct points are summed.
+                    const pts = recalculateStage1Points(row, data.role);
+                    return acc + pts;
                 }
                 return acc;
             }, 0);
 
-            const pointsRep = data.stage1.reduce((acc, row) => {
+            const pointsRep = finalStage1.reduce((acc, row) => {
                 // "總表回購" = Repurchase Only (Points for self from self)
                 if (row.status === Stage1Status.REPURCHASE) {
                     return acc + row.calculatedPoints;
@@ -145,19 +170,37 @@ export const exportToExcel = async (
                 return acc;
             }, 0);
 
-            // "總表開發" = Sum of (Full Points - Repurchase Points) where Current Person is the "Original Developer" in *OTHER PEOPLE'S* data.
+            // "總表開發" logic: Only applies to outgoing references where current person is Dev.
+            // This logic iterates ALL data (not just finalStage1) to find where 'I' am the Developer.
             let pointsTableDev = 0;
             // Iterate all other persons
             for (const otherPerson of Object.keys(processedData)) {
                 if (otherPerson === person) continue; // Skip self
                 const otherData = processedData[otherPerson];
                 otherData.stage1.forEach(row => {
+                    // Standard Repurchase Logic
                     if (row.originalDeveloper === person && row.status === Stage1Status.REPURCHASE) {
-                         // Re-calculate full points (as if DEVELOP)
                          const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, otherData.role);
                          const actualRepurchasePoints = row.calculatedPoints; // This is 50%
-                         // Dev points is the delta
                          pointsTableDev += (fullPoints - actualRepurchasePoints);
+                    }
+                    
+                    // Return Splitting Logic
+                    // If row is a RETURN, and I am the Developer, and Target is NOT me.
+                    // If Target IS me, it's incoming, handled above.
+                    // If Target is NOT me (e.g. Someone else returned, targeting Someone else, but I am Dev)
+                    // Or Someone else returned, targeting NO ONE (stayed), and I am Dev.
+                    if (row.status === Stage1Status.RETURN && row.originalDeveloper === person) {
+                        // Logic: Returns are split. I take part of the hit.
+                        // Points are negative.
+                        // I get the "Dev Share" of the deduction.
+                        // e.g. -3 pts. Target gets -1. Dev (me) gets -2.
+                        
+                        const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, otherData.role); // Full hit
+                        const sellerShare = recalculateStage1Points(row, otherData.role); // Seller share
+                        const devShare = fullPoints - sellerShare; // My share
+                        
+                        pointsTableDev += devShare; // This is negative, so it reduces my points
                     }
                 });
             }
@@ -244,12 +287,21 @@ export const exportToExcel = async (
             }
         };
 
-        // 1. Stage 1 Data
-        data.stage1.forEach(row => {
-            if (row.status === Stage1Status.DELETE) return;
-            
+        // 1. Stage 1 Data (Using Combined List)
+        finalStage1.forEach(row => {
+            // Note logic update
             const note = data.role === 'PHARMACIST' ? (row.category === '調劑點數' ? '' : row.status) : row.status;
-            const pts = (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') ? '' : row.calculatedPoints;
+            
+            // Recalculate points context for THIS person's sheet
+            // If row is incoming return, we need to calculate share
+            let pts = 0;
+            if (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') {
+                pts = 0;
+            } else {
+                pts = recalculateStage1Points(row, data.role);
+            }
+            // Fix: if empty string logic needed for display?
+            const ptsDisplay = (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') ? '' : pts;
 
             // Write Global Staff Info (Repeated per row)
             put(config.storeName, safeVal(staffInfo?.branch));
@@ -267,7 +319,7 @@ export const exportToExcel = async (
             
             put(config.amount, safeVal(row.amount)); 
             put(config.note, safeVal(note));
-            put(config.points, safeVal(pts));
+            put(config.points, safeVal(ptsDisplay));
             
             currentRow++;
         });
@@ -331,9 +383,9 @@ export const exportToExcel = async (
             row.commit();
         };
 
-        const s1Total = data.stage1.reduce((sum, row) => {
-            if (row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR || row.status === Stage1Status.REPURCHASE) {
-                return sum + row.calculatedPoints;
+        const s1Total = finalStage1.reduce((sum, row) => {
+            if (row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR || row.status === Stage1Status.REPURCHASE || row.status === Stage1Status.RETURN) {
+                return sum + recalculateStage1Points(row, data.role);
             }
             return sum;
         }, 0);
@@ -345,10 +397,9 @@ export const exportToExcel = async (
              : ["分類", "日期", "客戶編號", "品項編號", "品名", "數量", "金額", "備註", "計算點數"];
         addRow(header, true);
 
-        data.stage1.forEach(row => {
-            if (row.status === Stage1Status.DELETE) return;
+        finalStage1.forEach(row => {
             const note = data.role === 'PHARMACIST' ? (row.category === '調劑點數' ? '' : row.status) : row.status;
-            const pts = (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') ? '' : row.calculatedPoints;
+            const pts = (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') ? '' : recalculateStage1Points(row, data.role);
             addRow([
                 safeVal(row.category), safeVal(row.date), formatCID(row.customerID), // Use formatCID
                 safeVal(row.itemID), safeVal(row.itemName), safeVal(row.quantity),
@@ -415,12 +466,39 @@ export const exportToExcel = async (
      if (!selectedPersons.has(person)) continue;
      const data = processedData[person];
      data.stage1.forEach(row => {
+         // Add Normal Repurchase
          if (row.status === Stage1Status.REPURCHASE) {
              if (!repurchaseMap[person]) repurchaseMap[person] = { role: data.role as string, rows: [], totalPoints: 0 };
              repurchaseMap[person].rows.push(row);
              repurchaseMap[person].totalPoints += row.calculatedPoints;
          }
      });
+  }
+
+  // Handle Return Splitting (Negative Repurchase)
+  // We need to iterate ALL data to find rows where "I" am the Developer of a RETURN record
+  for (const person of sortedPersons) {
+      if (!selectedPersons.has(person)) continue;
+      
+      // Look for returns where person is Dev
+      Object.keys(processedData).forEach(otherPerson => {
+          processedData[otherPerson].stage1.forEach(row => {
+              if (row.status === Stage1Status.RETURN && row.originalDeveloper === person) {
+                   if (!repurchaseMap[person]) repurchaseMap[person] = { role: processedData[person].role as string, rows: [], totalPoints: 0 };
+                   
+                   // Calculate Dev Share (Negative)
+                   const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, processedData[otherPerson].role);
+                   const sellerShare = recalculateStage1Points(row, processedData[otherPerson].role);
+                   const devShare = fullPoints - sellerShare;
+                   
+                   // We need to create a visual row for this return logic
+                   // Clone row and set points to Dev Share for display
+                   const returnRow = { ...row, calculatedPoints: devShare };
+                   repurchaseMap[person].rows.push(returnRow);
+                   repurchaseMap[person].totalPoints += devShare;
+              }
+          });
+      });
   }
 
   if (Object.keys(repurchaseMap).length > 0) {
@@ -448,9 +526,41 @@ export const exportToExcel = async (
               const group = repurchaseMap[person];
               
               group.rows.forEach(row => {
-                 const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, group.role as any);
-                 const devPoints = fullPoints - row.calculatedPoints;
-                 const showDev = row.originalDeveloper && row.originalDeveloper !== '無';
+                 let devPoints = 0;
+                 let calcPoints = row.calculatedPoints;
+                 let showDev = row.originalDeveloper && row.originalDeveloper !== '無';
+                 
+                 // Display Logic for Return Rows in Repurchase Sheet
+                 if (row.status === Stage1Status.RETURN) {
+                     // In Repurchase Sheet, we show the Dev's burden
+                     // 'calculatedPoints' here is already set to devShare above
+                     // devPoints column (col I) usually shows the diff.
+                     // For return, 'Repurchase Points' col is usually the 50% share.
+                     // 'Dev Points' col is usually the Remainder.
+                     
+                     // Let's stick to standard map:
+                     // Col G (Repurchase Points) = The split share (or full if owned)
+                     // Col I (Dev Points) = The other share
+                     
+                     // If I am Dev:
+                     // I want to see My Share in Col G? Or Col I?
+                     // Standard Repurchase: Col G is what Sales gets (50%). Col I is what Dev gets (50%).
+                     // So here, Col G should be Seller Share. Col I should be Dev Share.
+                     
+                     // Re-calculate context
+                     const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined, returnTarget: undefined }, 'SALES'); // Approximate full
+                     const sellerShare = recalculateStage1Points(row, 'SALES');
+                     const myDevShare = row.calculatedPoints; // passed from above loop
+                     
+                     // Overwrite for display
+                     calcPoints = sellerShare; 
+                     devPoints = myDevShare;
+                     showDev = true; // Implicitly true here
+                 } else {
+                     // Standard Repurchase
+                     const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, group.role as any);
+                     devPoints = fullPoints - row.calculatedPoints;
+                 }
                  
                  const put = (col: string | undefined, val: any) => {
                     if (!col) return;
@@ -468,7 +578,7 @@ export const exportToExcel = async (
                  put(repConfig.itemID, safeVal(row.itemID));
                  put(repConfig.itemName, safeVal(row.itemName));
                  put(repConfig.quantity, safeVal(row.quantity));
-                 put(repConfig.repurchasePoints, safeVal(row.calculatedPoints));
+                 put(repConfig.repurchasePoints, safeVal(calcPoints));
                  put(repConfig.originalDeveloper, showDev ? safeVal(row.originalDeveloper) : '');
                  put(repConfig.devPoints, showDev ? safeVal(devPoints) : '');
                  
@@ -498,14 +608,26 @@ export const exportToExcel = async (
               addRepRow(["分類", "日期", "客戶編號", "品項編號", "品名", "數量", "回購點數", "原開發者", "開發點數"], 'header');
               
               group.rows.forEach(row => {
-                  const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, group.role as any);
-                  const devPoints = fullPoints - row.calculatedPoints;
-                  const showDev = row.originalDeveloper && row.originalDeveloper !== '無';
+                  let devPoints = 0;
+                  let calcPoints = row.calculatedPoints;
+                  let showDev = row.originalDeveloper && row.originalDeveloper !== '無';
+                  
+                  if (row.status === Stage1Status.RETURN) {
+                     // Same logic as Template Mode
+                     const sellerShare = recalculateStage1Points(row, 'SALES');
+                     const myDevShare = row.calculatedPoints;
+                     calcPoints = sellerShare; 
+                     devPoints = myDevShare;
+                     showDev = true;
+                  } else {
+                      const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, group.role as any);
+                      devPoints = fullPoints - row.calculatedPoints;
+                  }
                   
                   addRepRow([
                       safeVal(row.category), safeVal(row.date), formatCID(row.customerID), // Use formatCID
                       safeVal(row.itemID), safeVal(row.itemName), safeVal(row.quantity),
-                      safeVal(row.calculatedPoints),
+                      safeVal(calcPoints),
                       showDev ? safeVal(row.originalDeveloper) : '',
                       showDev ? safeVal(devPoints) : ''
                   ], 'data');

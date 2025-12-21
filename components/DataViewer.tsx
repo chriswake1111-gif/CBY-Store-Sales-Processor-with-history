@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { ProcessedData, Stage1Status, RepurchaseOption, StaffRecord } from '../types';
-import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp } from 'lucide-react';
+import { ProcessedData, Stage1Status, RepurchaseOption, StaffRecord, Stage1Row } from '../types';
+import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp, Undo2, ArrowRightLeft } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { getItemHistory, HistoryRecord } from '../utils/db'; // Import History Logic
 
@@ -19,10 +19,11 @@ interface DataViewerProps {
   handleToggleDeleteStage2: (id: string) => void;
   handleUpdateStage2CustomReward: (id: string, val: string) => void;
   // New Props
-  handleUpdateStage1Action2: (id: string, field: 'originalDeveloper' | 'repurchaseType', val: string) => void;
+  handleUpdateStage1Action2: (id: string, field: 'originalDeveloper' | 'repurchaseType' | 'returnTarget', val: string) => void;
   repurchaseOptions: RepurchaseOption[];
   allActiveStaff: string[];
   staffRecord?: StaffRecord;
+  fullProcessedData?: ProcessedData; // Added for Incoming Return Injection
   
   onClose?: () => void;
 }
@@ -31,7 +32,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
   sortedPeople, selectedPersons, togglePersonSelection, activePerson, setActivePerson,
   currentData, activeTab, setActiveTab, stage1TotalPoints,
   handleStatusChangeStage1, handleToggleDeleteStage2, handleUpdateStage2CustomReward,
-  handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord,
+  handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord, fullProcessedData,
   onClose
 }) => {
   
@@ -43,7 +44,8 @@ const DataViewer: React.FC<DataViewerProps> = ({
   const popoverRef = useRef<HTMLDivElement>(null);
 
   // Popover State for History View (Modified to include targetRowId for selection)
-  const [historyState, setHistoryState] = useState<{ x: number, y: number, records: HistoryRecord[], loading: boolean, targetRowId: string, targetCid: string, targetItemId: string } | null>(null);
+  // New: mode 'dev' or 'seller' to reuse history popover for "Original Seller" selection
+  const [historyState, setHistoryState] = useState<{ x: number, y: number, records: HistoryRecord[], loading: boolean, targetRowId: string, targetCid: string, targetItemId: string, mode: 'dev' | 'seller' } | null>(null);
   const historyRef = useRef<HTMLDivElement>(null);
 
   // Helper to get the correct document/window context (fixes Popout issues)
@@ -118,7 +120,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
     setPopoverState({ rowId, x: e.clientX + 10, y: e.clientY + 10 });
   };
 
-  const openHistoryAndSelectDev = async (e: React.MouseEvent, customerID: string, itemID: string, rowId: string) => {
+  const openHistoryAndSelect = async (e: React.MouseEvent, customerID: string, itemID: string, rowId: string, mode: 'dev' | 'seller') => {
       e.stopPropagation();
       setPopoverState(null); // Close other popover
 
@@ -130,7 +132,8 @@ const DataViewer: React.FC<DataViewerProps> = ({
           loading: true, 
           targetRowId: rowId,
           targetCid: customerID,
-          targetItemId: itemID
+          targetItemId: itemID,
+          mode
       });
 
       try {
@@ -149,9 +152,10 @@ const DataViewer: React.FC<DataViewerProps> = ({
     }
   };
 
-  const handleDeveloperSelect = (name: string) => {
+  const handlePersonSelect = (name: string) => {
     if (historyState && historyState.targetRowId) {
-        handleUpdateStage1Action2(historyState.targetRowId, 'originalDeveloper', name);
+        const field = historyState.mode === 'dev' ? 'originalDeveloper' : 'returnTarget';
+        handleUpdateStage1Action2(historyState.targetRowId, field, name);
         setHistoryState(null);
     }
   };
@@ -200,6 +204,22 @@ const DataViewer: React.FC<DataViewerProps> = ({
      return bonus > 0 ? bonus : 0;
   }, [currentData?.stage2, currentData?.role]);
 
+  // Aggregate Incoming Returns
+  const incomingReturns = useMemo(() => {
+      if (!fullProcessedData || !activePerson) return [];
+      const incoming: Stage1Row[] = [];
+      Object.keys(fullProcessedData).forEach(otherPerson => {
+          if (otherPerson === activePerson) return;
+          fullProcessedData[otherPerson].stage1.forEach(row => {
+              if (row.status === Stage1Status.RETURN && row.returnTarget === activePerson) {
+                  // Clone row to avoid mutation issues in render if needed, but here simple reference is fine for display
+                  incoming.push(row);
+              }
+          });
+      });
+      return incoming;
+  }, [fullProcessedData, activePerson]);
+
   const formatCID = (id: string) => {
     if (!id) return '';
     return id.startsWith('00') ? id.substring(2) : id;
@@ -233,6 +253,10 @@ const DataViewer: React.FC<DataViewerProps> = ({
 
   const genOpts = repurchaseOptions.filter(o => o.isEnabled && o.group === 'GENERAL');
   const specOpts = repurchaseOptions.filter(o => o.isEnabled && o.group === 'SPECIAL');
+
+  // Combined List for Stage 1: Own Data + Incoming Returns
+  // Note: Incoming returns are displayed at the end
+  const combinedStage1 = [...currentData.stage1, ...incomingReturns];
 
   return (
     <div ref={rootRef} className="flex flex-col h-full bg-white relative text-sm">
@@ -352,7 +376,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
               <thead className="bg-slate-100 sticky top-0 z-10 text-slate-700">
                 <tr>
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 w-24 bg-slate-100">Action</th>
-                  <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 w-44 bg-slate-100">Action 2</th>
+                  <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 w-48 bg-slate-100">Action 2 (原開發/原銷售)</th>
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">分類</th>
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">日期</th>
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">客戶編號</th>
@@ -365,18 +389,43 @@ const DataViewer: React.FC<DataViewerProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {currentData.stage1.map((row, idx) => {
+                {combinedStage1.map((row, idx) => {
+                  const isIncoming = row.salesPerson !== activePerson;
+                  
                   const isDel = row.status === Stage1Status.DELETE;
                   const isRep = row.status === Stage1Status.REPURCHASE;
+                  const isRet = row.status === Stage1Status.RETURN;
+                  
                   const isDispensing = isPharm && row.category === '調劑點數';
-                  const isHiddenPoints = row.category === '現金-小兒銷售';
-                  const isAction2Active = isRep;
+                  const isHiddenPoints = !isRet && row.category === '現金-小兒銷售';
 
+                  // Logic for Action 2 Availability:
+                  // Develop, Half-Year, Repurchase, Return all enable Action 2
+                  const isAction2Active = !isDel && (isRep || isRet || row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR);
+
+                  // If Transferred Out (Soft Delete):
+                  // This row is owned by current person BUT has a returnTarget set.
+                  const isTransferredOut = !isIncoming && !!row.returnTarget;
+
+                  // Styles
+                  let rowBg = idx % 2 === 0 ? 'bg-white' : 'bg-slate-50';
+                  if (isIncoming) rowBg = 'bg-red-50/50'; // Incoming return
+                  if (isTransferredOut) rowBg = 'bg-gray-100/80'; // Transferred out
+
+                  let textClass = 'text-slate-700';
+                  if (isDel) textClass = 'text-gray-300 line-through';
+                  else if (isTransferredOut) textClass = 'text-gray-400 line-through';
+                  else if (isIncoming) textClass = 'text-slate-600 italic';
+                  
                   return (
-                    <tr key={row.id} className={`group hover:bg-yellow-50 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                    <tr key={`${row.id}_${isIncoming ? 'inc' : 'own'}`} className={`group hover:bg-yellow-50 ${rowBg}`}>
                       {/* ACTION 1 */}
-                      <td className="px-2 py-1 border border-slate-200 text-center align-top">
-                        {isDispensing ? (
+                      <td className="px-2 py-1 border border-slate-200 text-center align-top relative">
+                         {isIncoming ? (
+                             <span className="text-[10px] text-red-500 font-bold flex items-center justify-center gap-1">
+                                 <ArrowRightLeft size={10}/> 轉入退貨
+                             </span>
+                         ) : isDispensing ? (
                           <button 
                             onClick={() => handleStatusChangeStage1(row.id, isDel ? Stage1Status.DEVELOP : Stage1Status.DELETE)}
                             className={`
@@ -389,72 +438,110 @@ const DataViewer: React.FC<DataViewerProps> = ({
                              {isDel ? '復原' : '刪除'}
                           </button>
                         ) : (
-                          <select value={row.status} onChange={(e) => handleStatusChangeStage1(row.id, e.target.value as Stage1Status)}
+                          <select 
+                              value={row.status} 
+                              onChange={(e) => handleStatusChangeStage1(row.id, e.target.value as Stage1Status)}
                               className={`
                                   w-full border text-[11px] font-bold py-0.5 px-1 rounded-sm focus:outline-none cursor-pointer
                                   ${isRep ? 'bg-amber-100 text-amber-800 border-amber-300' : 
-                                    isDel ? 'bg-red-100 text-red-800 border-red-300' : 
+                                    isRet ? 'bg-red-100 text-red-800 border-red-300' : 
+                                    isDel ? 'bg-gray-100 text-gray-400 border-gray-300' : 
                                     'bg-white text-slate-700 border-slate-300 hover:border-blue-400'}
-                              `}>
-                              <option value={Stage1Status.DEVELOP}>開發</option>
-                              <option value={Stage1Status.HALF_YEAR}>隔半年</option>
-                              <option value={Stage1Status.REPURCHASE}>回購</option>
-                              <option value={Stage1Status.DELETE}>刪除</option>
+                              `}
+                          >
+                              {/* If original quantity is negative, restrict options to RETURN / DELETE */}
+                              {row.quantity < 0 ? (
+                                  <>
+                                      <option value={Stage1Status.RETURN}>退貨</option>
+                                      <option value={Stage1Status.DELETE}>刪除</option>
+                                  </>
+                              ) : (
+                                  <>
+                                    <option value={Stage1Status.DEVELOP}>開發</option>
+                                    <option value={Stage1Status.HALF_YEAR}>隔半年</option>
+                                    <option value={Stage1Status.REPURCHASE}>回購</option>
+                                    <option value={Stage1Status.DELETE}>刪除</option>
+                                  </>
+                              )}
                           </select>
                         )}
                       </td>
 
                       {/* ACTION 2 */}
                       <td className="px-2 py-1 border border-slate-200 align-top">
-                        <div className={`flex gap-1 ${!isAction2Active ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
-                             {/* Original Developer Selector (Merged with History) */}
+                        <div className={`flex gap-1 ${!isAction2Active || isIncoming ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
+                             
+                             {/* Original Developer Selector (Also used for normal Repurchase) */}
                              <div className="relative flex-1">
                                 <button
-                                    onClick={(e) => openHistoryAndSelectDev(e, row.customerID, row.itemID, row.id)}
+                                    onClick={(e) => openHistoryAndSelect(e, row.customerID, row.itemID, row.id, 'dev')}
                                     className={`
                                       w-full text-[10px] border rounded px-1 py-0.5 text-left flex items-center justify-between
                                       ${row.originalDeveloper && row.originalDeveloper !== '無' 
                                           ? 'bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100' 
                                           : 'bg-white border-gray-300 text-gray-500 hover:border-blue-400 hover:text-blue-600'}
                                     `}
-                                    title="點擊選擇原開發者 (開啟歷史紀錄)"
+                                    title="點擊選擇原開發者"
                                 >
                                     <span className="truncate">{row.originalDeveloper || '選擇開發'}</span>
                                     <UserPlus size={10} className="opacity-50 shrink-0 ml-1"/>
                                 </button>
                              </div>
 
-                             {/* Repurchase Status */}
-                             <button 
-                                onClick={(e) => openPopover(e, row.id)}
-                                className={`
-                                    flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border truncate max-w-[80px]
-                                    ${row.repurchaseType ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'}
-                                `}
-                             >
-                                <ListPlus size={10} />
-                                <span className="truncate">{row.repurchaseType || '狀態'}</span>
-                             </button>
+                             {/* Second Button: Depends on Type */}
+                             {isRet ? (
+                                // For Returns: Original Seller Selector
+                                <div className="relative flex-1">
+                                    <button
+                                        onClick={(e) => openHistoryAndSelect(e, row.customerID, row.itemID, row.id, 'seller')}
+                                        className={`
+                                            w-full text-[10px] border rounded px-1 py-0.5 text-left flex items-center justify-between
+                                            ${row.returnTarget
+                                                ? 'bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100' 
+                                                : 'bg-white border-gray-300 text-gray-500 hover:border-red-400 hover:text-red-600'}
+                                        `}
+                                        title="選擇原銷售者 (轉出此筆資料)"
+                                    >
+                                        <span className="truncate">{row.returnTarget || '轉出對象'}</span>
+                                        <ArrowRightLeft size={10} className="opacity-50 shrink-0 ml-1"/>
+                                    </button>
+                                </div>
+                             ) : (
+                                // For Sales: Repurchase Status
+                                <button 
+                                    onClick={(e) => openPopover(e, row.id)}
+                                    className={`
+                                        flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border truncate max-w-[80px]
+                                        ${row.repurchaseType ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'}
+                                    `}
+                                >
+                                    <ListPlus size={10} />
+                                    <span className="truncate">{row.repurchaseType || '狀態'}</span>
+                                </button>
+                             )}
                         </div>
                       </td>
 
-                      <td className={`px-2 py-1 border border-slate-200 ${isDel ? 'text-gray-400 line-through' : 'text-slate-700 font-medium'}`}>{row.category}</td>
-                      <td className={`px-2 py-1 border border-slate-200 font-mono ${isDel ? 'text-gray-300 line-through' : 'text-slate-600'}`}>{row.date}</td>
-                      <td className={`px-2 py-1 border border-slate-200 font-mono ${isDel ? 'text-gray-300 line-through' : 'text-slate-600'}`}>{formatCID(row.customerID)}</td>
+                      <td className={`px-2 py-1 border border-slate-200 ${textClass}`}>
+                          {row.category}
+                          {isIncoming && <div className="text-[9px] text-slate-400">From: {row.salesPerson}</div>}
+                      </td>
+                      <td className={`px-2 py-1 border border-slate-200 font-mono ${textClass}`}>{row.date}</td>
+                      <td className={`px-2 py-1 border border-slate-200 font-mono ${textClass}`}>{formatCID(row.customerID)}</td>
                       
                       {/* Item ID - Plain Text now */}
-                      <td className={`px-2 py-1 border border-slate-200 font-mono text-[11px] ${isDel ? 'text-gray-300 line-through' : 'text-black font-bold'}`}>
+                      <td className={`px-2 py-1 border border-slate-200 font-mono text-[11px] ${textClass} ${!isDel && !isTransferredOut ? 'font-bold' : ''}`}>
                          {row.itemID}
                       </td>
 
-                      <td className={`px-2 py-1 border border-slate-200 ${isDel ? 'text-gray-300 line-through' : 'text-slate-800 font-medium'}`}>{row.itemName}</td>
+                      <td className={`px-2 py-1 border border-slate-200 ${textClass}`}>{row.itemName}</td>
 
-                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${isDel ? 'text-gray-300 line-through' : 'text-slate-700'}`}>{row.quantity}</td>
-                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${isDel ? 'text-gray-300 line-through' : 'text-slate-700'}`}>{row.amount}</td>
-                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${isDel ? 'text-gray-300 line-through' : 'text-slate-500 text-[11px]'}`}>{row.discountRatio}</td>
+                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${textClass}`}>{row.quantity}</td>
+                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${textClass}`}>{row.amount}</td>
+                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${textClass}`}>{row.discountRatio}</td>
 
-                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono font-bold ${isDel ? 'text-gray-300' : isRep ? 'text-amber-600' : 'text-slate-900'}`}>
-                          {isDel ? 0 : (isHiddenPoints ? '-' : row.calculatedPoints)}
+                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono font-bold ${isDel || isTransferredOut ? 'text-gray-300' : isRep ? 'text-amber-600' : isRet ? 'text-red-600' : 'text-slate-900'}`}>
+                          {isDel || isTransferredOut ? 0 : (isHiddenPoints ? '-' : row.calculatedPoints)}
                       </td>
                     </tr>
                   );
@@ -505,12 +592,14 @@ const DataViewer: React.FC<DataViewerProps> = ({
                     <div className="bg-slate-100 px-3 py-2 border-b border-gray-200 flex items-center justify-between shrink-0">
                         <div className="flex flex-col">
                            <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                                <History size={12} className="text-blue-500"/> 選擇原開發者
+                                <History size={12} className="text-blue-500"/> 
+                                {historyState.mode === 'dev' ? '選擇原開發者' : '選擇原銷售者(轉出)'}
                            </span>
                            <span className="text-[10px] text-gray-400 font-mono">{historyState.targetItemId}</span>
                         </div>
-                        <button onClick={() => handleDeveloperSelect('無')} className="text-[10px] px-2 py-1 bg-white border border-gray-300 text-gray-500 hover:text-red-600 hover:border-red-300 rounded transition-colors flex items-center gap-1">
-                            <XCircle size={10}/> 設為無
+                        <button onClick={() => handlePersonSelect(historyState.mode === 'dev' ? '無' : '')} className="text-[10px] px-2 py-1 bg-white border border-gray-300 text-gray-500 hover:text-red-600 hover:border-red-300 rounded transition-colors flex items-center gap-1">
+                            <XCircle size={10}/> 
+                            {historyState.mode === 'dev' ? '設為無' : '取消轉出'}
                         </button>
                     </div>
                     
@@ -547,15 +636,15 @@ const DataViewer: React.FC<DataViewerProps> = ({
                                                     {(rec.storeName || '未知').substring(0, 2)}
                                                 </span>
 
-                                                {/* Price Display */}
-                                                <span className="text-[10px] text-gray-400 font-mono ml-1">
+                                                {/* Price Display - Changed to Black */}
+                                                <span className="text-[10px] text-black font-mono ml-1">
                                                     (${rec.price || 0})
                                                 </span>
                                             </div>
 
                                             {/* Sales Person Selection Button */}
                                             <button 
-                                                onClick={() => rec.salesPerson && handleDeveloperSelect(rec.salesPerson)}
+                                                onClick={() => rec.salesPerson && handlePersonSelect(rec.salesPerson)}
                                                 disabled={!rec.salesPerson}
                                                 className={`
                                                     text-[10px] px-2 py-0.5 rounded border whitespace-nowrap transition-all flex items-center gap-1

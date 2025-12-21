@@ -35,6 +35,7 @@ export const STAGE1_SORT_ORDER: Record<string, number> = {
   '成人保健品': 5,
   '嬰幼兒米麥精': 6,
   '現金-小兒銷售': 7,
+  '退換貨': 999 // Put Returns at the end
 };
 
 // 5. Updated Cosmetic Codes (6291 -> 6292)
