@@ -143,8 +143,20 @@ export const exportToExcel = async (
         // Lookup staff info early for both Stats and List Rows
         const staffInfo = staffMasterList.find(s => s.name === person);
 
+        // Define generic helper to write to a cell coordinate
+        const writeToCell = (addr: string | undefined, val: any) => {
+            if (addr && /^[A-Z]+[0-9]+$/.test(addr)) {
+                 try { sheet.getCell(addr).value = val; } catch {}
+            }
+        };
+
+        // --- WRITE BASIC INFO (Single Cell) ---
+        // Moved from per-row list to single cell write here
+        writeToCell(config.storeName, safeVal(staffInfo?.branch));
+        writeToCell(config.staffID, safeVal(staffInfo?.id));
+        writeToCell(config.staffName, person);
+
         // 1. STATS FILLING (Only for Sales / Template Mode)
-        // Check if we have specific cell mappings and process them first (Fixed Layout)
         if (data.role !== 'PHARMACIST') {
             
             // Calculate Stats based on FINAL STAGE 1 (including injected returns)
@@ -154,8 +166,6 @@ export const exportToExcel = async (
                 if (row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR || row.status === Stage1Status.RETURN) {
                     // For injected returns, we need to recalculate context? 
                     // recalculateStage1Points uses row status and handles splitting.
-                    // IMPORTANT: If row is incoming return, the `recalculateStage1Points` logic might check dev.
-                    // We need to ensure correct points are summed.
                     const pts = recalculateStage1Points(row, data.role);
                     return acc + pts;
                 }
@@ -170,8 +180,7 @@ export const exportToExcel = async (
                 return acc;
             }, 0);
 
-            // "總表開發" logic: Only applies to outgoing references where current person is Dev.
-            // This logic iterates ALL data (not just finalStage1) to find where 'I' am the Developer.
+            // "總表開發" logic
             let pointsTableDev = 0;
             // Iterate all other persons
             for (const otherPerson of Object.keys(processedData)) {
@@ -186,20 +195,10 @@ export const exportToExcel = async (
                     }
                     
                     // Return Splitting Logic
-                    // If row is a RETURN, and I am the Developer, and Target is NOT me.
-                    // If Target IS me, it's incoming, handled above.
-                    // If Target is NOT me (e.g. Someone else returned, targeting Someone else, but I am Dev)
-                    // Or Someone else returned, targeting NO ONE (stayed), and I am Dev.
                     if (row.status === Stage1Status.RETURN && row.originalDeveloper === person) {
-                        // Logic: Returns are split. I take part of the hit.
-                        // Points are negative.
-                        // I get the "Dev Share" of the deduction.
-                        // e.g. -3 pts. Target gets -1. Dev (me) gets -2.
-                        
                         const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, otherData.role); // Full hit
                         const sellerShare = recalculateStage1Points(row, otherData.role); // Seller share
                         const devShare = fullPoints - sellerShare; // My share
-                        
                         pointsTableDev += devShare; // This is negative, so it reduces my points
                     }
                 });
@@ -236,37 +235,30 @@ export const exportToExcel = async (
                 }
             });
 
-            // WRITE STATS TO SPECIFIC CELLS
-            const writeCell = (addr: string | undefined, val: any) => {
-                if (addr && /^[A-Z]+[0-9]+$/.test(addr)) {
-                     try { sheet.getCell(addr).value = val; } catch {}
-                }
-            };
-
             // Points Section
-            writeCell(config.cell_pointsStd, staffInfo?.pointsStandard || ''); // 點數標準
-            writeCell(config.cell_pointsTotal, ''); // 總計 (User requested blank)
-            writeCell(config.cell_pointsDev, pointsDev); // 個人開發
-            writeCell(config.cell_pointsRep, pointsRep); // 總表回購
-            writeCell(config.cell_pointsTableDev, pointsTableDev); // 總表開發
-            writeCell(config.cell_pointsMilkDev, ''); // 奶粉開發 (User requested blank)
+            writeToCell(config.cell_pointsStd, staffInfo?.pointsStandard || ''); // 點數標準
+            writeToCell(config.cell_pointsTotal, ''); // 總計 (User requested blank)
+            writeToCell(config.cell_pointsDev, pointsDev); // 個人開發
+            writeToCell(config.cell_pointsRep, pointsRep); // 總表回購
+            writeToCell(config.cell_pointsTableDev, pointsTableDev); // 總表開發
+            writeToCell(config.cell_pointsMilkDev, ''); // 奶粉開發 (User requested blank)
 
             // Cosmetic Section
-            writeCell(config.cell_cosmeticStd, staffInfo?.cosmeticStandard || ''); // 美妝標準
-            writeCell(config.cell_cosmeticTotal, cosmeticTotal);
-            writeCell(config.cell_amtLrp, amtLrp);
-            writeCell(config.cell_amtCerave, amtCerave);
-            writeCell(config.cell_amtDrSatin, amtDrSatin);
-            writeCell(config.cell_amtCetaphil, amtCetaphil);
-            writeCell(config.cell_amtFlora, amtFlora);
-            writeCell(config.cell_amtEmployee, ''); // 員購 (User requested blank)
+            writeToCell(config.cell_cosmeticStd, staffInfo?.cosmeticStandard || ''); // 美妝標準
+            writeToCell(config.cell_cosmeticTotal, cosmeticTotal);
+            writeToCell(config.cell_amtLrp, amtLrp);
+            writeToCell(config.cell_amtCerave, amtCerave);
+            writeToCell(config.cell_amtDrSatin, amtDrSatin);
+            writeToCell(config.cell_amtCetaphil, amtCetaphil);
+            writeToCell(config.cell_amtFlora, amtFlora);
+            writeToCell(config.cell_amtEmployee, ''); // 員購 (User requested blank)
 
             // Rewards Section
-            writeCell(config.cell_rewardCash, rewardCash);
-            writeCell(config.cell_rewardMilk, ''); // 小兒奶粉 (User requested blank)
-            writeCell(config.cell_reward711, reward711);
-            writeCell(config.cell_rewardFamily, rewardFamily);
-            writeCell(config.cell_rewardPx, rewardPx);
+            writeToCell(config.cell_rewardCash, rewardCash);
+            writeToCell(config.cell_rewardMilk, ''); // 小兒奶粉 (User requested blank)
+            writeToCell(config.cell_reward711, reward711);
+            writeToCell(config.cell_rewardFamily, rewardFamily);
+            writeToCell(config.cell_rewardPx, rewardPx);
         }
 
         // 2. LIST DATA WRITING
@@ -293,20 +285,13 @@ export const exportToExcel = async (
             const note = data.role === 'PHARMACIST' ? (row.category === '調劑點數' ? '' : row.status) : row.status;
             
             // Recalculate points context for THIS person's sheet
-            // If row is incoming return, we need to calculate share
             let pts = 0;
             if (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') {
                 pts = 0;
             } else {
                 pts = recalculateStage1Points(row, data.role);
             }
-            // Fix: if empty string logic needed for display?
             const ptsDisplay = (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') ? '' : pts;
-
-            // Write Global Staff Info (Repeated per row)
-            put(config.storeName, safeVal(staffInfo?.branch));
-            put(config.staffID, safeVal(staffInfo?.id));
-            put(config.staffName, person);
 
             put(config.category, safeVal(row.category));
             put(config.date, safeVal(row.date));
@@ -341,11 +326,6 @@ export const exportToExcel = async (
                  if (r.isDeleted) return;
                  let reward = r.format === '禮券' ? `${r.quantity}張` : `${r.customReward ?? (r.quantity * r.reward)}元`;
                  
-                 // Write Global Staff Info (Repeated per row) for Stage 2 as well
-                 put(config.storeName, safeVal(staffInfo?.branch));
-                 put(config.staffID, safeVal(staffInfo?.id));
-                 put(config.staffName, person);
-
                  // Use Specific Reward Mapping
                  // Default Fallbacks: Map to similar columns as Stage 1 if config is missing (for safety)
                  put(config.reward_category || config.category, r.category);

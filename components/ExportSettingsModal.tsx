@@ -218,12 +218,9 @@ const ExportSettingsModal: React.FC<ExportSettingsModalProps> = ({ onClose }) =>
                 <button onClick={() => setActiveTab('MAPPING')} disabled={!currentTemplate} className={`flex-1 py-3 text-sm font-bold ${activeTab === 'MAPPING' ? 'bg-white text-blue-600 border-t-2 border-t-blue-600' : 'text-gray-400'}`}>
                     2. 列表欄位對應
                 </button>
-                {/* Only Show Stats Tab for Sales */}
-                {activeTypeId === TEMPLATE_IDS.SALES && (
-                     <button onClick={() => setActiveTab('STATS')} disabled={!currentTemplate} className={`flex-1 py-3 text-sm font-bold ${activeTab === 'STATS' ? 'bg-white text-emerald-600 border-t-2 border-t-emerald-600' : 'text-gray-400'}`}>
-                        3. 統計欄位對應
-                    </button>
-                )}
+                <button onClick={() => setActiveTab('STATS')} disabled={!currentTemplate} className={`flex-1 py-3 text-sm font-bold ${activeTab === 'STATS' ? 'bg-white text-emerald-600 border-t-2 border-t-emerald-600' : 'text-gray-400'}`}>
+                    3. 統計/固定欄位
+                </button>
             </div>
 
             <div className="p-6 overflow-y-auto flex-1 relative bg-white">
@@ -301,12 +298,7 @@ const ExportSettingsModal: React.FC<ExportSettingsModalProps> = ({ onClose }) =>
                             </div>
                         ) : (
                             <>
-                            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-2 mb-1 border-b pb-1">人員資訊 (填入每一列)</div>
-                            <div className="space-y-1">
-                                {renderColInput('店名 (分店)', 'storeName', '例如 A')}
-                                {renderColInput('編號 (ID)', 'staffID', '例如 B')}
-                                {renderColInput('姓名', 'staffName', '例如 C')}
-                            </div>
+                            {/* Staff Info removed from here and moved to Stats/Fixed Cells tab */}
 
                             <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-2 mb-1 border-b pb-1">第一階段：點數表</div>
                             <div className="space-y-1">
@@ -347,37 +339,52 @@ const ExportSettingsModal: React.FC<ExportSettingsModalProps> = ({ onClose }) =>
                      <div className="space-y-4">
                         <div className="bg-emerald-50 p-3 rounded border border-emerald-100 text-emerald-800 text-xs mb-4">
                             <LayoutGrid size={16} className="inline mr-1 mb-0.5"/>
-                            設定統計數值要填入 Excel 的哪一格 (例如 D4, G10)。未設定則不填入。
+                            設定固定數值要填入 Excel 的哪一格 (例如 D4, G10)。未設定則不填入。
                         </div>
                         
                         <div className="grid grid-cols-2 gap-x-8 gap-y-1">
-                            {/* Points Section */}
-                            <div className="col-span-2 text-xs font-bold text-slate-400 uppercase tracking-wider mt-2 mb-1 border-b pb-1">點數相關</div>
-                            {renderCellInput('點數標準 (來自員工設定)', 'cell_pointsStd')}
-                            {renderCellInput('點數總計 (不填入)', 'cell_pointsTotal')}
-                            {renderCellInput('個人開發 (除回購外總和)', 'cell_pointsDev')}
-                            {renderCellInput('總表回購 (個人回購總和)', 'cell_pointsRep')}
-                            {renderCellInput('總表開發 (他店回購差額)', 'cell_pointsTableDev')}
-                            {renderCellInput('奶粉開發 (不填入)', 'cell_pointsMilkDev')}
+                            {/* Basic Info - Available for all types (Sales/Pharm) except maybe Repurchase */}
+                            {activeTypeId !== TEMPLATE_IDS.REPURCHASE && (
+                                <>
+                                    <div className="col-span-2 text-xs font-bold text-slate-400 uppercase tracking-wider mt-2 mb-1 border-b pb-1">基本資訊 (填入特定儲存格)</div>
+                                    {renderCellInput('店名 (分店)', 'storeName', '例如 B2')}
+                                    {renderCellInput('編號 (ID)', 'staffID', '例如 D2')}
+                                    {renderCellInput('姓名', 'staffName', '例如 F2')}
+                                </>
+                            )}
 
-                            {/* Cosmetic Section */}
-                            <div className="col-span-2 text-xs font-bold text-slate-400 uppercase tracking-wider mt-4 mb-1 border-b pb-1">美妝品牌金額</div>
-                            {renderCellInput('美妝標準 (來自員工設定)', 'cell_cosmeticStd')}
-                            {renderCellInput('美妝總計', 'cell_cosmeticTotal')}
-                            {renderCellInput('理膚 (LRP)', 'cell_amtLrp')}
-                            {renderCellInput('適樂膚 (CeraVe)', 'cell_amtCerave')}
-                            {renderCellInput('Dr.Satin', 'cell_amtDrSatin')}
-                            {renderCellInput('舒特膚 (Cetaphil)', 'cell_amtCetaphil')}
-                            {renderCellInput('芙樂思 (Flora)', 'cell_amtFlora')}
-                            {renderCellInput('員購 (不填入)', 'cell_amtEmployee')}
+                            {/* Sales Only Sections */}
+                            {activeTypeId === TEMPLATE_IDS.SALES && (
+                                <>
+                                    {/* Points Section */}
+                                    <div className="col-span-2 text-xs font-bold text-slate-400 uppercase tracking-wider mt-4 mb-1 border-b pb-1">點數相關</div>
+                                    {renderCellInput('點數標準 (來自員工設定)', 'cell_pointsStd')}
+                                    {renderCellInput('點數總計 (不填入)', 'cell_pointsTotal')}
+                                    {renderCellInput('個人開發 (除回購外總和)', 'cell_pointsDev')}
+                                    {renderCellInput('總表回購 (個人回購總和)', 'cell_pointsRep')}
+                                    {renderCellInput('總表開發 (他店回購差額)', 'cell_pointsTableDev')}
+                                    {renderCellInput('奶粉開發 (不填入)', 'cell_pointsMilkDev')}
 
-                            {/* Rewards Section */}
-                            <div className="col-span-2 text-xs font-bold text-slate-400 uppercase tracking-wider mt-4 mb-1 border-b pb-1">其他獎勵合計</div>
-                            {renderCellInput('現金獎勵總額', 'cell_rewardCash')}
-                            {renderCellInput('小兒奶粉 (不填入)', 'cell_rewardMilk')}
-                            {renderCellInput('7-11 禮卷張數', 'cell_reward711')}
-                            {renderCellInput('全家 禮卷張數', 'cell_rewardFamily')}
-                            {renderCellInput('全聯 禮卷張數', 'cell_rewardPx')}
+                                    {/* Cosmetic Section */}
+                                    <div className="col-span-2 text-xs font-bold text-slate-400 uppercase tracking-wider mt-4 mb-1 border-b pb-1">美妝品牌金額</div>
+                                    {renderCellInput('美妝標準 (來自員工設定)', 'cell_cosmeticStd')}
+                                    {renderCellInput('美妝總計', 'cell_cosmeticTotal')}
+                                    {renderCellInput('理膚 (LRP)', 'cell_amtLrp')}
+                                    {renderCellInput('適樂膚 (CeraVe)', 'cell_amtCerave')}
+                                    {renderCellInput('Dr.Satin', 'cell_amtDrSatin')}
+                                    {renderCellInput('舒特膚 (Cetaphil)', 'cell_amtCetaphil')}
+                                    {renderCellInput('芙樂思 (Flora)', 'cell_amtFlora')}
+                                    {renderCellInput('員購 (不填入)', 'cell_amtEmployee')}
+
+                                    {/* Rewards Section */}
+                                    <div className="col-span-2 text-xs font-bold text-slate-400 uppercase tracking-wider mt-4 mb-1 border-b pb-1">其他獎勵合計</div>
+                                    {renderCellInput('現金獎勵總額', 'cell_rewardCash')}
+                                    {renderCellInput('小兒奶粉 (不填入)', 'cell_rewardMilk')}
+                                    {renderCellInput('7-11 禮卷張數', 'cell_reward711')}
+                                    {renderCellInput('全家 禮卷張數', 'cell_rewardFamily')}
+                                    {renderCellInput('全聯 禮卷張數', 'cell_rewardPx')}
+                                </>
+                            )}
                         </div>
 
                          <div className="flex justify-end pt-4">
