@@ -54,6 +54,7 @@ export interface StaffRecord {
   name: string;
   role: StaffRole;
   branch?: string; // New: Branch Name
+  customerID?: string; // New: Employee's Customer ID for self-purchase tracking
   pointsStandard?: number; // New: Points Target
   cosmeticStandard?: number; // New: Cosmetic Target
 }

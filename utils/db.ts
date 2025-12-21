@@ -8,6 +8,7 @@ export interface HistoryRecord {
   itemID: string;
   date: string; // YYYY-MM-DD or ROC Year (YYYMMDD...)
   quantity: number; // Added quantity field
+  price?: number; // New: Unit Price from history
   storeName?: string; // New field for Branch separation
   salesPerson?: string; // New field for Sales Person
   // Optional field for display purposes (not stored in DB, but returned by queries)

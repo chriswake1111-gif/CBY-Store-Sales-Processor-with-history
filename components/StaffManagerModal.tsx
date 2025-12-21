@@ -19,7 +19,7 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
     if (!e.target.files || !e.target.files[0]) return;
     try {
       const json = await readExcelFile(e.target.files[0]);
-      // Expect columns: 員工編號(optional), 員工姓名, 職位(門市/藥師/無獎金), 分店, 點數標準, 美妝標準
+      // Expect columns: 員工編號(optional), 員工姓名, 職位(門市/藥師/無獎金), 分店, 員工客戶編號, 點數標準, 美妝標準
       const newStaff: StaffRecord[] = [];
       const currentIds = new Set(localList.map(s => s.name)); // Using Name as unique key primarily
 
@@ -37,6 +37,7 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
 
          // New Fields
          const branch = String(row['分店'] || row['Branch'] || row['Store'] || '').trim();
+         const cid = String(row['員工客戶編號'] || row['客戶編號'] || row['CID'] || '').trim();
          const pointsStd = Number(row['點數標準'] || row['Points Std'] || 0);
          const cosmeticStd = Number(row['美妝標準'] || row['Cosmetic Std'] || 0);
 
@@ -45,6 +46,7 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
              newStaff.push({ 
                  id, name, role, 
                  branch: branch || undefined, 
+                 customerID: cid || undefined,
                  pointsStandard: pointsStd || undefined,
                  cosmeticStandard: cosmeticStd || undefined
              });
@@ -87,7 +89,7 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-7xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="bg-slate-800 text-white px-6 py-4 flex justify-between items-center shrink-0">
           <h3 className="text-lg font-bold flex items-center gap-2"><UserCog size={20}/> 員工職位設定表</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={24}/></button>
@@ -123,6 +125,7 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
                         <tr>
                             <th className="px-4 py-3 w-24">員工編號</th>
                             <th className="px-4 py-3 w-32">員工姓名</th>
+                            <th className="px-4 py-3 w-32">員工客戶編號</th>
                             <th className="px-4 py-3 w-32">職位</th>
                             <th className="px-4 py-3 w-32">分店</th>
                             <th className="px-4 py-3 w-24 text-right">點數標準</th>
@@ -140,6 +143,10 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
                                 <td className="px-4 py-2">
                                     <input type="text" value={staff.name} onChange={e => updateRow(idx, 'name', e.target.value)} 
                                         className="w-full bg-transparent border-b border-transparent focus:border-blue-500 focus:outline-none py-1 font-bold text-slate-700" placeholder="姓名" />
+                                </td>
+                                <td className="px-4 py-2">
+                                    <input type="text" value={staff.customerID || ''} onChange={e => updateRow(idx, 'customerID', e.target.value)} 
+                                        className="w-full bg-transparent border-b border-transparent focus:border-blue-500 focus:outline-none py-1 text-purple-600 font-mono" placeholder="CID" />
                                 </td>
                                 <td className="px-4 py-2">
                                     <select value={staff.role} onChange={e => updateRow(idx, 'role', e.target.value as StaffRole)}
@@ -173,7 +180,7 @@ const StaffManagerModal: React.FC<StaffManagerModalProps> = ({ staffList, onSave
                             </tr>
                         ))}
                         {filteredList.length === 0 && (
-                            <tr><td colSpan={7} className="p-8 text-center text-gray-400">無符合資料</td></tr>
+                            <tr><td colSpan={8} className="p-8 text-center text-gray-400">無符合資料</td></tr>
                         )}
                     </tbody>
                 </table>
