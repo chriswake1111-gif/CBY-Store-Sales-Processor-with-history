@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { ProcessedData, Stage1Status, RepurchaseOption, StaffRecord, Stage1Row } from '../types';
-import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp, Undo2, ArrowRightLeft } from 'lucide-react';
+import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp, Undo2, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { getItemHistory, HistoryRecord } from '../utils/db'; // Import History Logic
 
@@ -28,6 +28,9 @@ interface DataViewerProps {
   onClose?: () => void;
 }
 
+type SortKey = 'date' | 'customerID' | null;
+type SortDirection = 'asc' | 'desc';
+
 const DataViewer: React.FC<DataViewerProps> = ({
   sortedPeople, selectedPersons, togglePersonSelection, activePerson, setActivePerson,
   currentData, activeTab, setActiveTab, stage1TotalPoints,
@@ -43,10 +46,12 @@ const DataViewer: React.FC<DataViewerProps> = ({
   const [popoverState, setPopoverState] = useState<{ rowId: string, x: number, y: number } | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Popover State for History View (Modified to include targetRowId for selection)
-  // New: mode 'dev' or 'seller' to reuse history popover for "Original Seller" selection
+  // Popover State for History View
   const [historyState, setHistoryState] = useState<{ x: number, y: number, records: HistoryRecord[], loading: boolean, targetRowId: string, targetCid: string, targetItemId: string, mode: 'dev' | 'seller' } | null>(null);
   const historyRef = useRef<HTMLDivElement>(null);
+
+  // Sorting State
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey, direction: SortDirection }>({ key: null, direction: 'asc' });
 
   // Helper to get the correct document/window context (fixes Popout issues)
   const getContext = () => {
@@ -88,6 +93,11 @@ const DataViewer: React.FC<DataViewerProps> = ({
         adjustPosition(historyRef.current, historyState.x, historyState.y);
     }
   }, [historyState]);
+
+  // Reset sorting when changing person
+  useEffect(() => {
+      setSortConfig({ key: null, direction: 'asc' });
+  }, [activePerson]);
 
   const adjustPosition = (el: HTMLElement, targetX: number, targetY: number) => {
         const { width, height } = el.getBoundingClientRect();
@@ -158,6 +168,27 @@ const DataViewer: React.FC<DataViewerProps> = ({
         handleUpdateStage1Action2(historyState.targetRowId, field, name);
         setHistoryState(null);
     }
+  };
+
+  // --- Sorting Logic ---
+  const handleSort = (key: SortKey) => {
+      setSortConfig(current => {
+          if (current.key === key) {
+              // Toggle direction
+              return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+          }
+          // New key, default asc
+          return { key, direction: 'asc' };
+      });
+  };
+
+  const handleResetSort = () => {
+      setSortConfig({ key: null, direction: 'asc' });
+  };
+
+  const getSortIcon = (key: SortKey) => {
+      if (sortConfig.key !== key) return <ArrowUpDown size={10} className="opacity-30" />;
+      return sortConfig.direction === 'asc' ? <ArrowUp size={10} className="text-blue-600"/> : <ArrowDown size={10} className="text-blue-600"/>;
   };
 
   const getStoreColorClass = (name: string) => {
@@ -255,8 +286,30 @@ const DataViewer: React.FC<DataViewerProps> = ({
   const specOpts = repurchaseOptions.filter(o => o.isEnabled && o.group === 'SPECIAL');
 
   // Combined List for Stage 1: Own Data + Incoming Returns
-  // Note: Incoming returns are displayed at the end
+  // Note: Incoming returns are displayed at the end in default sort
   const combinedStage1 = [...currentData.stage1, ...incomingReturns];
+
+  // Apply Sorting for Display
+  const sortedStage1 = useMemo(() => {
+      if (!sortConfig.key) return combinedStage1;
+
+      return [...combinedStage1].sort((a, b) => {
+          let valA: string | number = '';
+          let valB: string | number = '';
+
+          if (sortConfig.key === 'date') {
+              valA = a.date;
+              valB = b.date;
+          } else if (sortConfig.key === 'customerID') {
+              valA = a.customerID;
+              valB = b.customerID;
+          }
+
+          if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+          if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+          return 0;
+      });
+  }, [combinedStage1, sortConfig]);
 
   return (
     <div ref={rootRef} className="flex flex-col h-full bg-white relative text-sm">
@@ -377,9 +430,41 @@ const DataViewer: React.FC<DataViewerProps> = ({
                 <tr>
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 w-24 bg-slate-100">Action</th>
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 w-48 bg-slate-100">Action 2 (原開發/原銷售)</th>
-                  <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">分類</th>
-                  <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">日期</th>
-                  <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">客戶編號</th>
+                  
+                  {/* Category: Click to Reset Sort */}
+                  <th 
+                    onClick={handleResetSort}
+                    className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100 cursor-pointer hover:bg-slate-200 transition-colors group"
+                    title="點擊恢復原始排序"
+                  >
+                    <div className="flex items-center gap-1">
+                        分類
+                        {sortConfig.key !== null && <Undo2 size={10} className="text-red-500 animate-in fade-in"/>}
+                    </div>
+                  </th>
+
+                  {/* Date: Sortable */}
+                  <th 
+                    onClick={() => handleSort('date')}
+                    className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100 cursor-pointer hover:bg-slate-200 transition-colors select-none"
+                  >
+                    <div className="flex items-center gap-1">
+                        日期
+                        {getSortIcon('date')}
+                    </div>
+                  </th>
+
+                  {/* CustomerID: Sortable */}
+                  <th 
+                    onClick={() => handleSort('customerID')}
+                    className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100 cursor-pointer hover:bg-slate-200 transition-colors select-none"
+                  >
+                    <div className="flex items-center gap-1">
+                        客戶編號
+                        {getSortIcon('customerID')}
+                    </div>
+                  </th>
+
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">品項編號</th>
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">品名</th>
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100 text-right">數量</th>
@@ -389,7 +474,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {combinedStage1.map((row, idx) => {
+                {sortedStage1.map((row, idx) => {
                   const isIncoming = row.salesPerson !== activePerson;
                   
                   const isDel = row.status === Stage1Status.DELETE;
