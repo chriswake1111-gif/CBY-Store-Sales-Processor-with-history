@@ -29,84 +29,113 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
   const processed: Stage1Row[] = [];
 
   for (const row of rawData) {
+    // 1. Basic Data Integrity
     const cid = getVal(row, COL_HEADERS.CUSTOMER_ID);
     if (!cid || cid === 'undefined') continue;
 
-    const debt = getNum(row, COL_HEADERS.DEBT);
-    // Note: Negative quantity (return) might come with negative debt or 0 debt, we process returns regardless of debt check if QTY < 0
-    const qty = getNum(row, COL_HEADERS.QUANTITY);
-    const isReturn = qty < 0;
-
-    if (!isReturn && debt > 0) continue;
-    
-    const points = getNum(row, COL_HEADERS.POINTS) || getNum(row, '點數');
-    if (points === 0 && !isReturn) continue; // Allow return to proceed even if points is 0 (though unlikely)
-
+    // 2. Zero Value Checks (Must happen before Return logic)
+    // If unit price is 0, it's likely a gift or system error -> Skip
     if (getNum(row, COL_HEADERS.UNIT_PRICE) === 0) continue;
 
+    // If original points are 0, there is no bonus to give OR take away -> Skip
+    const points = getNum(row, COL_HEADERS.POINTS) || getNum(row, '點數');
+    if (points === 0) continue;
+
+    // 3. Exclusion List Checks
     const cat1 = getStr(row, COL_HEADERS.CAT_1);
     const unit = getStr(row, COL_HEADERS.UNIT);
+    // Exclude Specific Milk Cans
     if (cat1 === '05-2' && (unit === '罐' || unit === '瓶')) continue;
 
     const itemID = getStr(row, COL_HEADERS.ITEM_ID);
+    // Exclude Pharmacist Items
     if (dispensingItemIDs.has(itemID)) continue;
 
+    // 4. Debt Check (Contextual)
+    const qty = getNum(row, COL_HEADERS.QUANTITY);
+    const debt = getNum(row, COL_HEADERS.DEBT);
+    const isReturn = qty < 0;
+
+    // If it's a SALE (qty > 0) and has DEBT, skip it (No points for debt).
+    // If it's a RETURN (qty < 0), we ignore the debt column (allow it to pass to deduct points).
+    if (!isReturn && debt > 0) continue;
+
+    // --- DATA PREPARATION ---
     const rawPoints = points;
-    
-    // Extract new fields
     const amount = getNum(row, COL_HEADERS.SUBTOTAL);
     const discountRatio = getStr(row, COL_HEADERS.DISCOUNT_RATIO);
-    
-    let category = CAT_MAPPING[cat1] || '其他';
     const itemName = getVal(row, COL_HEADERS.ITEM_NAME) || getVal(row, '品名') || '';
-
-    if (cat1 === '05-3') {
-      const nameStr = String(itemName);
-      if (nameStr.includes('麥精') || nameStr.includes('米精')) {
-        category = '嬰幼兒米麥精';
-      }
-    }
-
-    // Special handling for Returns
-    if (isReturn) {
-        category = '退換貨';
-    }
-    
-    let calculatedPoints = 0;
-    if (category === '現金-小兒銷售') {
-        calculatedPoints = 0;
-    } else {
-        const isDividedByQty = category === '成人奶粉' || category === '成人奶水' || category === '嬰幼兒米麥精';
-        // For returns, we still divide if needed, but floor of negative number handles differently
-        // e.g. -5 / 2 = -2.5 -> floor is -3. But we usually want symmetric. 
-        // Use trunc for symmetric division towards zero, then apply manual logic if needed.
-        if (isDividedByQty) {
-             const absPts = Math.abs(rawPoints);
-             const absQty = Math.abs(qty || 1);
-             const ptsPerItem = Math.floor(absPts / absQty);
-             calculatedPoints = isReturn ? -ptsPerItem : ptsPerItem;
-        } else {
-             calculatedPoints = rawPoints;
-        }
-    }
-
     const ticketNo = getStr(row, COL_HEADERS.TICKET_NO);
     const dateStr = ticketNo.length >= 7 ? ticketNo.substring(5, 7) : '??';
-    
-    // --- ASYNC HISTORY CHECK ---
+
+    let category = '其他'; 
+    let calculatedPoints = 0;
     let status = Stage1Status.DEVELOP;
 
+    // --- 5. FINAL CLASSIFICATION (Return vs Sale) ---
+    
     if (isReturn) {
+        // --- RETURN LOGIC ---
+        category = '退換貨';
         status = Stage1Status.RETURN;
-    } else if (calculatedPoints > 0 || category === '現金-小兒銷售') {
-       const isRepurchase = await checkRepurchase(cid, itemID);
-       if (isRepurchase) {
-          status = Stage1Status.REPURCHASE;
-          // Apply repurchase logic immediately
-          if (calculatedPoints > 0) {
-             calculatedPoints = Math.floor(calculatedPoints / 2);
+        
+        // Determine Division Logic for Returns (to match Sale logic)
+        // We need to know what the item category *would be* to divide points correctly
+        // Reuse mapping logic temporarily
+        let tempCat = CAT_MAPPING[cat1] || '其他';
+        if (cat1 === '05-3' && (String(itemName).includes('麥精') || String(itemName).includes('米精'))) {
+            tempCat = '嬰幼兒米麥精';
+        }
+
+        if (tempCat === '現金-小兒銷售') {
+            calculatedPoints = 0;
+        } else {
+            const isDividedByQty = tempCat === '成人奶粉' || tempCat === '成人奶水' || tempCat === '嬰幼兒米麥精';
+            if (isDividedByQty) {
+                 const absPts = Math.abs(rawPoints);
+                 const absQty = Math.abs(qty || 1);
+                 // Calculate unit point then negation
+                 const ptsPerItem = Math.floor(absPts / absQty);
+                 calculatedPoints = -ptsPerItem;
+            } else {
+                 calculatedPoints = rawPoints;
+            }
+        }
+
+    } else {
+        // --- SALES LOGIC ---
+        category = CAT_MAPPING[cat1] || '其他';
+        if (cat1 === '05-3') {
+          const nameStr = String(itemName);
+          if (nameStr.includes('麥精') || nameStr.includes('米精')) {
+            category = '嬰幼兒米麥精';
           }
-       }
+        }
+
+        // Calculate Initial Points
+        if (category === '現金-小兒銷售') {
+            calculatedPoints = 0;
+        } else {
+            const isDividedByQty = category === '成人奶粉' || category === '成人奶水' || category === '嬰幼兒米麥精';
+            if (isDividedByQty) {
+                 calculatedPoints = Math.floor(rawPoints / (qty || 1));
+            } else {
+                 calculatedPoints = rawPoints;
+            }
+        }
+
+        // Check Repurchase (Async)
+        // Only check if it carries points or is specific tracking category
+        if (calculatedPoints > 0 || category === '現金-小兒銷售') {
+           const isRepurchase = await checkRepurchase(cid, itemID);
+           if (isRepurchase) {
+              status = Stage1Status.REPURCHASE;
+              // Apply repurchase penalty
+              if (calculatedPoints > 0) {
+                 calculatedPoints = Math.floor(calculatedPoints / 2);
+              }
+           }
+        }
     }
 
     processed.push({
