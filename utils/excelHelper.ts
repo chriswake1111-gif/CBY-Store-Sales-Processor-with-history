@@ -523,17 +523,33 @@ function copySheetModel(source: ExcelJS.Worksheet, target: ExcelJS.Worksheet, ma
     
     // Copy Page Setup
     target.pageSetup = { ...source.pageSetup };
+
+    // Copy Worksheet Properties (e.g. default row height, fit to page)
+    if (source.properties) {
+        target.properties = JSON.parse(JSON.stringify(source.properties));
+    }
     
-    // Copy Header Rows (up to maxRow)
+    // Copy Views (e.g. Frozen Rows/Cols)
+    if (source.views) {
+        target.views = JSON.parse(JSON.stringify(source.views));
+    }
+    
+    // Iterate ALL rows in source to preserve heights/hidden status
     source.eachRow({ includeEmpty: true }, (row, rowNumber) => {
-        if (rowNumber >= maxRow) return; // Limit header copy range based on startRow
         const newRow = target.getRow(rowNumber);
-        newRow.height = row.height;
-        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-             const newCell = newRow.getCell(colNumber);
-             newCell.value = cell.value;
-             applyCellStyle(newCell, cell);
-        });
+        
+        // Always copy row dimension properties
+        if (row.height) newRow.height = row.height;
+        newRow.hidden = row.hidden;
+        
+        // Only copy cell content/styles if within the header range (before startRow)
+        if (rowNumber < maxRow) {
+             row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                 const newCell = newRow.getCell(colNumber);
+                 newCell.value = cell.value;
+                 applyCellStyle(newCell, cell);
+            });
+        }
     });
 
     // Copy Merges (Robust method)
