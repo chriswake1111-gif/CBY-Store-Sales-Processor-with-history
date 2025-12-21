@@ -1,10 +1,9 @@
-
 import React, { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { ProcessedData, Stage1Status, RepurchaseOption, StaffRecord, Stage1Row } from '../types';
 import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp, Undo2, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown, RefreshCcw } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { getItemHistory, HistoryRecord } from '../utils/db'; 
-import { recalculateStage1Points } from '../utils/processor'; // Need calculation logic
+import { recalculateStage1Points } from '../utils/processor'; 
 
 interface DataViewerProps {
   sortedPeople: string[];
@@ -13,7 +12,7 @@ interface DataViewerProps {
   activePerson: string;
   setActivePerson: (person: string) => void;
   currentData: ProcessedData[string] | null;
-  activeTab: 'stage1' | 'stage2' | 'stage3' | 'repurchase'; // Added repurchase
+  activeTab: 'stage1' | 'stage2' | 'stage3' | 'repurchase'; 
   setActiveTab: (tab: 'stage1' | 'stage2' | 'stage3' | 'repurchase') => void;
   stage1TotalPoints: number;
   handleStatusChangeStage1: (id: string, newStatus: Stage1Status) => void;
@@ -191,25 +190,84 @@ const DataViewer: React.FC<DataViewerProps> = ({
     return id.startsWith('00') ? id.substring(2) : id;
   };
 
-  // --- REPURCHASE SUMMARY LOGIC ---
+  // --- STATISTICS FOR TABS ---
+  const pointStats = useMemo(() => {
+      if (!currentData || !activePerson || !fullProcessedData) {
+          return { dev: 0, rep: 0, tableDev: 0 };
+      }
+
+      let dev = 0;
+      let rep = 0;
+
+      // 1. Calculate Own Sales (Dev vs Rep)
+      currentData.stage1.forEach(row => {
+          if (row.status === Stage1Status.DELETE) return;
+
+          if (row.status === Stage1Status.REPURCHASE) {
+              rep += row.calculatedPoints;
+          } 
+          else if (row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR) {
+              dev += row.calculatedPoints;
+          }
+          else if (row.status === Stage1Status.RETURN) {
+              // Only count returns that aren't transferred OUT
+              if (!row.returnTarget) {
+                  dev += row.calculatedPoints;
+              }
+          }
+      });
+
+      // 2. Add Incoming Returns (Penalties from others) to Dev score
+      incomingReturns.forEach(row => {
+           // We are the target, so we take the hit.
+           // Recalculate based on OUR role (context is us)
+           // But recalculateStage1Points usually uses row data. 
+           // The simple addition here works because 'calculatedPoints' for a return is usually negative.
+           // However, we need to ensure we use the correct logic for ME taking the hit.
+           // If I am the target, I act as the "Original Seller".
+           // The standard recalculate logic for RETURN status handles the 50% split if 'originalDeveloper' is present on the row.
+           const points = recalculateStage1Points(row, currentData.role);
+           dev += points;
+      });
+
+      // 3. Calculate Table Development (Bonuses from being Original Developer)
+      let tableDev = 0;
+      Object.values(fullProcessedData).forEach(personData => {
+          personData.stage1.forEach(row => {
+              if (row.originalDeveloper === activePerson) {
+                  if (row.status === Stage1Status.REPURCHASE) {
+                      // Bonus = Full - Seller's Share
+                      const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, personData.role);
+                      const sellerPoints = row.calculatedPoints;
+                      tableDev += (fullPoints - sellerPoints);
+                  } 
+                  else if (row.status === Stage1Status.RETURN) {
+                       // Penalty Share = Full Deduction - Seller's Share
+                       const fullDeduction = recalculateStage1Points({ ...row, originalDeveloper: undefined }, personData.role);
+                       const sellerDeduction = recalculateStage1Points(row, personData.role);
+                       tableDev += (fullDeduction - sellerDeduction);
+                  }
+              }
+          });
+      });
+
+      return { dev, rep, tableDev };
+  }, [currentData, activePerson, fullProcessedData, incomingReturns]);
+
+  // --- REPURCHASE SUMMARY MATRIX LOGIC ---
   interface RepurchaseRowData extends Stage1Row {
       devPoints: number;
       actualSellerPoints: number;
   }
 
-  // 1. Gather all repurchase data from everyone
   const repurchaseMatrix = useMemo(() => {
       if (!fullProcessedData) return { developers: [], dataBySeller: {} };
 
       const developersSet = new Set<string>();
       const groupedData: Record<string, RepurchaseRowData[]> = {};
 
-      Object.keys(fullProcessedData).forEach(sellerName => {
-          const sellerData = fullProcessedData[sellerName];
+      Object.entries(fullProcessedData).forEach(([sellerName, sellerData]) => {
           sellerData.stage1.forEach(row => {
-              // Valid Repurchase Logic:
-              // 1. Status is REPURCHASE
-              // 2. OR Status is RETURN and has originalDeveloper set (Split logic)
               const isRepurchase = row.status === Stage1Status.REPURCHASE;
               const isReturnSplit = row.status === Stage1Status.RETURN && row.originalDeveloper && row.originalDeveloper !== '無';
               
@@ -217,25 +275,16 @@ const DataViewer: React.FC<DataViewerProps> = ({
                   const dev = row.originalDeveloper;
                   if (dev) {
                       developersSet.add(dev);
-
                       if (!groupedData[sellerName]) groupedData[sellerName] = [];
                       
-                      // Calculate Points Logic
                       let fullPoints = 0;
-                      let sellerPoints = row.calculatedPoints; // Usually 50%
+                      let sellerPoints = row.calculatedPoints;
                       let devPoints = 0;
 
                       if (isReturnSplit) {
-                           // For Returns:
-                           // sellerPoints is already calculated as the seller's share (e.g. -1)
-                           // We need full deduction to find Dev's share
                            fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, sellerData.role);
-                           // Dev Share = Total - Seller Share (e.g. -3 - (-1) = -2)
                            devPoints = fullPoints - sellerPoints;
                       } else {
-                           // For Sales:
-                           // sellerPoints is 50%
-                           // fullPoints is 100% (Calculate as if it was DEVELOP status)
                            fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, sellerData.role);
                            devPoints = fullPoints - sellerPoints;
                       }
@@ -250,10 +299,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
           });
       });
 
-      // Sort Developers to keep columns consistent
       const sortedDevelopers = Array.from(developersSet).sort();
-      
-      // Sort Rows within each seller by date
       Object.keys(groupedData).forEach(key => {
           groupedData[key].sort((a, b) => a.date.localeCompare(b.date));
       });
@@ -281,11 +327,22 @@ const DataViewer: React.FC<DataViewerProps> = ({
   const getStage2Label = () => isPharm ? '當月調劑件數' : '現金獎勵表';
 
   const tabs = [
-    { id: 'stage1', label: '點數表', count: `${stage1TotalPoints}`, icon: <Coins size={12}/> },
+    { 
+        id: 'stage1', 
+        label: '點數表', 
+        count: (
+           <span className="flex items-center gap-1 font-mono text-[10px] leading-none">
+             <span className="text-slate-600 font-bold" title="個人開發點數">{pointStats.dev}</span>
+             <span className="text-gray-300">/</span>
+             <span className="text-amber-600 font-bold" title="總表回購點數">{pointStats.rep}</span>
+             <span className="text-gray-300">/</span>
+             <span className="text-purple-600 font-bold" title="總表開發點數">{pointStats.tableDev}</span>
+           </span>
+        ), 
+        icon: <Coins size={12}/> 
+    },
     { id: 'stage2', label: getStage2Label(), count: isPharm ? '' : `${currentData.stage2.filter(r => !r.isDeleted).length}`, icon: <Pill size={12}/> },
-    // Only Sales show Stage 3
     ...(isPharm ? [] : [{ id: 'stage3', label: '美妝金額', count: `${currentData.stage3.total.toLocaleString()}`, icon: <Package size={12}/> }]),
-    // Repurchase Tab (Global)
     { id: 'repurchase', label: '回購總表', count: '', icon: <RefreshCcw size={12}/> }
   ];
 
@@ -392,7 +449,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
                         >
                             {tab.label}
                             {tab.count !== '' && (
-                                <span className={`text-[10px] px-1 py-0 rounded-sm font-mono ${isActive ? 'bg-slate-200 text-slate-700' : 'bg-gray-300 text-gray-600'}`}>
+                                <span className={`text-[10px] px-1 py-0.5 rounded-sm font-mono ${isActive ? 'bg-slate-200 text-slate-700' : 'bg-gray-300 text-gray-600'}`}>
                                     {tab.count}
                                 </span>
                             )}
