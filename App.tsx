@@ -60,7 +60,7 @@ const App: React.FC = () => {
   
   const [activePerson, setActivePerson] = useState<string>('');
   const [selectedPersons, setSelectedPersons] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'stage1' | 'stage2' | 'stage3'>('stage1');
+  const [activeTab, setActiveTab] = useState<'stage1' | 'stage2' | 'stage3' | 'repurchase'>('stage1');
   const [isPopOut, setIsPopOut] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
