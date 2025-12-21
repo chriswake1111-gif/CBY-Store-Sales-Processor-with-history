@@ -50,9 +50,9 @@ export const exportToExcel = async (
   // 1. Load All Templates
   const salesTmpl = await getTemplate(TEMPLATE_IDS.SALES);
   const pharmTmpl = await getTemplate(TEMPLATE_IDS.PHARMACIST);
-  const repTmpl = await getTemplate(TEMPLATE_IDS.REPURCHASE);
-
-  // Pre-load Template Workbooks to access their sheets later
+  // Note: We ignore Repurchase Template for Matrix View as it's dynamic
+  
+  // Pre-load Template Workbooks
   const loadTmplWB = async (tmpl: TemplateRecord | undefined) => {
       if (!tmpl || !tmpl.data) return null;
       try {
@@ -64,8 +64,7 @@ export const exportToExcel = async (
 
   const salesWB = await loadTmplWB(salesTmpl);
   const pharmWB = await loadTmplWB(pharmTmpl);
-  const repWB = await loadTmplWB(repTmpl);
-
+  
   const outWorkbook = new ExcelJS.Workbook();
 
   // Sort Logic: SALES (1) -> PHARMACIST (2) -> OTHERS (3), then by Name
@@ -151,7 +150,6 @@ export const exportToExcel = async (
         };
 
         // --- WRITE BASIC INFO (Single Cell) ---
-        // Moved from per-row list to single cell write here
         writeToCell(config.storeName, safeVal(staffInfo?.branch));
         writeToCell(config.staffID, safeVal(staffInfo?.id));
         writeToCell(config.staffName, person);
@@ -164,8 +162,6 @@ export const exportToExcel = async (
             const pointsDev = finalStage1.reduce((acc, row) => {
                 // "個人開發" = Develop + Half Year + Return (Calculated points already handled)
                 if (row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR || row.status === Stage1Status.RETURN) {
-                    // For injected returns, we need to recalculate context? 
-                    // recalculateStage1Points uses row status and handles splitting.
                     const pts = recalculateStage1Points(row, data.role);
                     return acc + pts;
                 }
@@ -182,9 +178,8 @@ export const exportToExcel = async (
 
             // "總表開發" logic
             let pointsTableDev = 0;
-            // Iterate all other persons
             for (const otherPerson of Object.keys(processedData)) {
-                if (otherPerson === person) continue; // Skip self
+                if (otherPerson === person) continue; 
                 const otherData = processedData[otherPerson];
                 otherData.stage1.forEach(row => {
                     // Standard Repurchase Logic
@@ -196,10 +191,10 @@ export const exportToExcel = async (
                     
                     // Return Splitting Logic
                     if (row.status === Stage1Status.RETURN && row.originalDeveloper === person) {
-                        const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, otherData.role); // Full hit
-                        const sellerShare = recalculateStage1Points(row, otherData.role); // Seller share
-                        const devShare = fullPoints - sellerShare; // My share
-                        pointsTableDev += devShare; // This is negative, so it reduces my points
+                        const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, otherData.role); 
+                        const sellerShare = recalculateStage1Points(row, otherData.role); 
+                        const devShare = fullPoints - sellerShare; 
+                        pointsTableDev += devShare;
                     }
                 });
             }
@@ -225,7 +220,6 @@ export const exportToExcel = async (
             data.stage2.forEach(row => {
                 if (row.isDeleted) return;
                 if (row.format === '禮券') {
-                    // Fuzzy match for voucher types
                     const label = (row.rewardLabel || '').toLowerCase();
                     if (label.includes('7-11') || label.includes('seven')) reward711 += row.quantity;
                     else if (label.includes('全家')) rewardFamily += row.quantity;
@@ -236,26 +230,26 @@ export const exportToExcel = async (
             });
 
             // Points Section
-            writeToCell(config.cell_pointsStd, staffInfo?.pointsStandard || ''); // 點數標準
-            writeToCell(config.cell_pointsTotal, ''); // 總計 (User requested blank)
-            writeToCell(config.cell_pointsDev, pointsDev); // 個人開發
-            writeToCell(config.cell_pointsRep, pointsRep); // 總表回購
-            writeToCell(config.cell_pointsTableDev, pointsTableDev); // 總表開發
-            writeToCell(config.cell_pointsMilkDev, ''); // 奶粉開發 (User requested blank)
+            writeToCell(config.cell_pointsStd, staffInfo?.pointsStandard || ''); 
+            writeToCell(config.cell_pointsTotal, ''); 
+            writeToCell(config.cell_pointsDev, pointsDev); 
+            writeToCell(config.cell_pointsRep, pointsRep); 
+            writeToCell(config.cell_pointsTableDev, pointsTableDev); 
+            writeToCell(config.cell_pointsMilkDev, ''); 
 
             // Cosmetic Section
-            writeToCell(config.cell_cosmeticStd, staffInfo?.cosmeticStandard || ''); // 美妝標準
+            writeToCell(config.cell_cosmeticStd, staffInfo?.cosmeticStandard || ''); 
             writeToCell(config.cell_cosmeticTotal, cosmeticTotal);
             writeToCell(config.cell_amtLrp, amtLrp);
             writeToCell(config.cell_amtCerave, amtCerave);
             writeToCell(config.cell_amtDrSatin, amtDrSatin);
             writeToCell(config.cell_amtCetaphil, amtCetaphil);
             writeToCell(config.cell_amtFlora, amtFlora);
-            writeToCell(config.cell_amtEmployee, ''); // 員購 (User requested blank)
+            writeToCell(config.cell_amtEmployee, '');
 
             // Rewards Section
             writeToCell(config.cell_rewardCash, rewardCash);
-            writeToCell(config.cell_rewardMilk, ''); // 小兒奶粉 (User requested blank)
+            writeToCell(config.cell_rewardMilk, '');
             writeToCell(config.cell_reward711, reward711);
             writeToCell(config.cell_rewardFamily, rewardFamily);
             writeToCell(config.cell_rewardPx, rewardPx);
@@ -269,7 +263,6 @@ export const exportToExcel = async (
             const cell = sheet.getCell(`${col}${currentRow}`);
             cell.value = val;
             
-            // Re-apply style from template row if exists (helps if adding many rows)
             if (tmplSourceSheet) {
                const tmplRowIdx = config.startRow || 2;
                const templateCell = tmplSourceSheet.getCell(`${col}${tmplRowIdx}`);
@@ -279,12 +272,9 @@ export const exportToExcel = async (
             }
         };
 
-        // 1. Stage 1 Data (Using Combined List)
+        // 1. Stage 1 Data
         finalStage1.forEach(row => {
-            // Note logic update
             const note = data.role === 'PHARMACIST' ? (row.category === '調劑點數' ? '' : row.status) : row.status;
-            
-            // Recalculate points context for THIS person's sheet
             let pts = 0;
             if (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') {
                 pts = 0;
@@ -295,24 +285,19 @@ export const exportToExcel = async (
 
             put(config.category, safeVal(row.category));
             put(config.date, safeVal(row.date));
-            put(config.customerID, formatCID(row.customerID)); // Use formatCID
+            put(config.customerID, formatCID(row.customerID)); 
             put(config.itemID, safeVal(row.itemID));
             put(config.itemName, safeVal(row.itemName));
-            
-            // MODIFIED: Only export Quantity for PHARMACIST, exclude for SALES
             put(config.quantity, data.role === 'PHARMACIST' ? safeVal(row.quantity) : '');
-            
             put(config.amount, safeVal(row.amount)); 
             put(config.note, safeVal(note));
             put(config.points, safeVal(ptsDisplay));
-            
             currentRow++;
         });
 
         // Append Stage 2 below
         currentRow += 2;
         
-        // Helper for Stage 2 Simple Row (Title)
         const addSimpleRow = (vals: any[]) => {
              const r = sheet.getRow(currentRow++);
              r.values = vals;
@@ -326,17 +311,14 @@ export const exportToExcel = async (
                  if (r.isDeleted) return;
                  let reward = r.format === '禮券' ? `${r.quantity}張` : `${r.customReward ?? (r.quantity * r.reward)}元`;
                  
-                 // Use Specific Reward Mapping
-                 // Default Fallbacks: Map to similar columns as Stage 1 if config is missing (for safety)
                  put(config.reward_category || config.category, r.category);
                  put(config.reward_date || config.date, r.displayDate);
-                 put(config.reward_customerID || config.customerID, formatCID(r.customerID)); // Use formatCID
+                 put(config.reward_customerID || config.customerID, formatCID(r.customerID));
                  put(config.reward_itemID || config.itemID, r.itemID);
                  put(config.reward_itemName || config.itemName, r.itemName);
                  put(config.reward_quantity || config.quantity, r.quantity);
-                 put(config.reward_note || 'G', r.note); // Note often in G or H
+                 put(config.reward_note || 'G', r.note); 
                  put(config.reward_amount || 'H', reward); 
-                 
                  currentRow++;
              });
              
@@ -347,7 +329,7 @@ export const exportToExcel = async (
              }
         }
     } else {
-        // NO TEMPLATE MODE (Default Layout) - Unchanged
+        // NO TEMPLATE MODE
         let startRow = 1;
         const addRow = (values: any[], isHeader = false, isSectionTitle = false) => {
             const row = sheet.getRow(startRow++);
@@ -381,7 +363,7 @@ export const exportToExcel = async (
             const note = data.role === 'PHARMACIST' ? (row.category === '調劑點數' ? '' : row.status) : row.status;
             const pts = (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') ? '' : recalculateStage1Points(row, data.role);
             addRow([
-                safeVal(row.category), safeVal(row.date), formatCID(row.customerID), // Use formatCID
+                safeVal(row.category), safeVal(row.date), formatCID(row.customerID), 
                 safeVal(row.itemID), safeVal(row.itemName), safeVal(row.quantity),
                 safeVal(row.amount), safeVal(note), safeVal(pts)
             ]);
@@ -389,7 +371,7 @@ export const exportToExcel = async (
         
         startRow++; 
 
-        // STAGE 2 & 3 (Same legacy logic...)
+        // STAGE 2 & 3
         if (data.role === 'PHARMACIST') {
             addRow([`【第二階段：當月調劑件數】`], false, true);
             addRow(["品項編號", "品名", "數量"], true);
@@ -423,7 +405,7 @@ export const exportToExcel = async (
                     rewardDisplay = `${amount}元`;
                 }
                 addRow([
-                    safeVal(row.category), safeVal(row.displayDate), formatCID(row.customerID), // Use formatCID
+                    safeVal(row.category), safeVal(row.displayDate), formatCID(row.customerID),
                     safeVal(row.itemID), safeVal(row.itemName), safeVal(row.quantity),
                     safeVal(row.note), safeVal(rewardDisplay)
                 ]);
@@ -440,181 +422,211 @@ export const exportToExcel = async (
     }
   }
 
-  // --- 2. REPURCHASE SHEET (GLOBAL) ---
-  const repurchaseMap: Record<string, { role: string, rows: Stage1Row[], totalPoints: number }> = {};
-  for (const person of sortedPersons) {
-     if (!selectedPersons.has(person)) continue;
-     const data = processedData[person];
-     data.stage1.forEach(row => {
-         // Add Normal Repurchase
-         if (row.status === Stage1Status.REPURCHASE) {
-             if (!repurchaseMap[person]) repurchaseMap[person] = { role: data.role as string, rows: [], totalPoints: 0 };
-             repurchaseMap[person].rows.push(row);
-             repurchaseMap[person].totalPoints += row.calculatedPoints;
-         }
-     });
+  // --- 2. REPURCHASE SHEET (MATRIX VIEW) ---
+  // Step 1: Gather Matrix Data
+  interface RepurchaseRowData extends Stage1Row {
+      actualSellerPoints: number;
+      devPoints: number;
   }
+  
+  const matrixData: Record<string, RepurchaseRowData[]> = {};
+  const developersSet = new Set<string>();
 
-  // Handle Return Splitting (Negative Repurchase)
-  // We need to iterate ALL data to find rows where "I" am the Developer of a RETURN record
-  for (const person of sortedPersons) {
-      if (!selectedPersons.has(person)) continue;
-      
-      // Look for returns where person is Dev
-      Object.keys(processedData).forEach(otherPerson => {
-          processedData[otherPerson].stage1.forEach(row => {
-              if (row.status === Stage1Status.RETURN && row.originalDeveloper === person) {
-                   if (!repurchaseMap[person]) repurchaseMap[person] = { role: processedData[person].role as string, rows: [], totalPoints: 0 };
-                   
-                   // Calculate Dev Share (Negative)
-                   const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, processedData[otherPerson].role);
-                   const sellerShare = recalculateStage1Points(row, processedData[otherPerson].role);
-                   const devShare = fullPoints - sellerShare;
-                   
-                   // We need to create a visual row for this return logic
-                   // Clone row and set points to Dev Share for display
-                   const returnRow = { ...row, calculatedPoints: devShare };
-                   repurchaseMap[person].rows.push(returnRow);
-                   repurchaseMap[person].totalPoints += devShare;
-              }
-          });
-      });
-  }
+  // Only selected persons' data logic, BUT Repurchase Summary typically involves "Who got dev points"
+  // The preview shows ALL data, so for export, we should also check all processed data or just selected?
+  // Usually export should reflect what's on screen (ALL) or what's selected?
+  // The preview uses `fullProcessedData`, so we should iterate all processedData
+  // HOWEVER, filtering by `selectedPersons` in the Staff Sheets loop implies user only wants specific reports.
+  // But Repurchase Matrix is a Summary. Let's stick to including everyone involved in the selected persons' scope?
+  // Or match the Preview exactly which shows everything. 
+  // Safety: Iterate `sortedPersons` (which is all keys).
+  
+  for (const sellerName of sortedPersons) {
+      // If we want to filter rows only for selected sellers? 
+      // User said "Like Preview". Preview shows rows for all sellers.
+      // But if I unselect someone, maybe I don't want them in export?
+      // Let's filter by `selectedPersons` to be consistent with Staff Sheets behavior.
+      if (!selectedPersons.has(sellerName)) continue;
 
-  if (Object.keys(repurchaseMap).length > 0) {
-      const repSheetName = "回購總表";
-      let repSheet: ExcelJS.Worksheet;
-      const repSourceSheet = repWB?.worksheets[0];
-      const repConfig = repTmpl?.config;
+      const sellerData = processedData[sellerName];
+      const rows: RepurchaseRowData[] = [];
 
-      if (repSourceSheet) {
-          repSheet = outWorkbook.addWorksheet(repSheetName);
-          copySheetModel(repSourceSheet, repSheet, repConfig?.startRow || 20);
-      } else {
-          repSheet = outWorkbook.addWorksheet(repSheetName);
-          repSheet.columns = [
-            { width: 25 }, { width: 10 }, { width: 12 }, { width: 12 }, { width: 25 }, { width: 8 }, { width: 10 }, { width: 15 }, { width: 10 }
-          ];
-      }
-
-      // WRITE REPURCHASE DATA
-      if (repConfig) {
-          // Template Mode
-          let currentRow = repConfig.startRow || 2;
+      sellerData.stage1.forEach(row => {
+          const isRepurchase = row.status === Stage1Status.REPURCHASE;
+          const isReturnSplit = row.status === Stage1Status.RETURN && row.originalDeveloper && row.originalDeveloper !== '無';
           
-          Object.keys(repurchaseMap).sort().forEach(person => {
-              const group = repurchaseMap[person];
-              
-              group.rows.forEach(row => {
-                 let devPoints = 0;
-                 let calcPoints = row.calculatedPoints;
-                 let showDev = row.originalDeveloper && row.originalDeveloper !== '無';
-                 
-                 // Display Logic for Return Rows in Repurchase Sheet
-                 if (row.status === Stage1Status.RETURN) {
-                     // In Repurchase Sheet, we show the Dev's burden
-                     // 'calculatedPoints' here is already set to devShare above
-                     // devPoints column (col I) usually shows the diff.
-                     // For return, 'Repurchase Points' col is usually the 50% share.
-                     // 'Dev Points' col is usually the Remainder.
-                     
-                     // Let's stick to standard map:
-                     // Col G (Repurchase Points) = The split share (or full if owned)
-                     // Col I (Dev Points) = The other share
-                     
-                     // If I am Dev:
-                     // I want to see My Share in Col G? Or Col I?
-                     // Standard Repurchase: Col G is what Sales gets (50%). Col I is what Dev gets (50%).
-                     // So here, Col G should be Seller Share. Col I should be Dev Share.
-                     
-                     // Re-calculate context
-                     const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined, returnTarget: undefined }, 'SALES'); // Approximate full
-                     const sellerShare = recalculateStage1Points(row, 'SALES');
-                     const myDevShare = row.calculatedPoints; // passed from above loop
-                     
-                     // Overwrite for display
-                     calcPoints = sellerShare; 
-                     devPoints = myDevShare;
-                     showDev = true; // Implicitly true here
-                 } else {
-                     // Standard Repurchase
-                     const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, group.role as any);
-                     devPoints = fullPoints - row.calculatedPoints;
-                 }
-                 
-                 const put = (col: string | undefined, val: any) => {
-                    if (!col) return;
-                    const cell = repSheet.getCell(`${col}${currentRow}`);
-                    cell.value = val;
-                    if (repSourceSheet) {
-                        const templateCell = repSourceSheet.getCell(`${col}${repConfig.startRow || 2}`);
-                        if (templateCell) applyCellStyle(cell, templateCell);
-                    }
-                 };
+          if (isRepurchase || isReturnSplit) {
+              const dev = row.originalDeveloper;
+              if (dev) {
+                  developersSet.add(dev);
 
-                 put(repConfig.category, person); // Reuse Category Col for Sales Person Name
-                 put(repConfig.date, safeVal(row.date));
-                 put(repConfig.customerID, formatCID(row.customerID)); // Use formatCID
-                 put(repConfig.itemID, safeVal(row.itemID));
-                 put(repConfig.itemName, safeVal(row.itemName));
-                 put(repConfig.quantity, safeVal(row.quantity));
-                 put(repConfig.repurchasePoints, safeVal(calcPoints));
-                 put(repConfig.originalDeveloper, showDev ? safeVal(row.originalDeveloper) : '');
-                 put(repConfig.devPoints, showDev ? safeVal(devPoints) : '');
-                 
-                 currentRow++;
-              });
-              // Add spacer row?
-              currentRow++;
-          });
-      } else {
-          // Default Mode
-          let rRow = 1;
-          const addRepRow = (values: any[], style: 'header' | 'title' | 'data') => {
-              const row = repSheet.getRow(rRow++);
-              row.values = values;
-              if (style === 'title') {
-                  row.font = { bold: true, size: 12 };
-                  row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBAF' } };
-              } else if (style === 'header') {
-                  row.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-                  row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEA580C' } };
-              }
-          };
-
-          Object.keys(repurchaseMap).sort().forEach(person => {
-              const group = repurchaseMap[person];
-              addRepRow([`${person}    回購總點數：${group.totalPoints}`], 'title');
-              addRepRow(["分類", "日期", "客戶編號", "品項編號", "品名", "數量", "回購點數", "原開發者", "開發點數"], 'header');
-              
-              group.rows.forEach(row => {
+                  // Calculate Points
+                  let fullPoints = 0;
+                  let sellerPoints = row.calculatedPoints;
                   let devPoints = 0;
-                  let calcPoints = row.calculatedPoints;
-                  let showDev = row.originalDeveloper && row.originalDeveloper !== '無';
-                  
-                  if (row.status === Stage1Status.RETURN) {
-                     // Same logic as Template Mode
-                     const sellerShare = recalculateStage1Points(row, 'SALES');
-                     const myDevShare = row.calculatedPoints;
-                     calcPoints = sellerShare; 
-                     devPoints = myDevShare;
-                     showDev = true;
+
+                  if (isReturnSplit) {
+                       fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, sellerData.role);
+                       devPoints = fullPoints - sellerPoints;
                   } else {
-                      const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, group.role as any);
-                      devPoints = fullPoints - row.calculatedPoints;
+                       fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, sellerData.role);
+                       devPoints = fullPoints - sellerPoints;
                   }
                   
-                  addRepRow([
-                      safeVal(row.category), safeVal(row.date), formatCID(row.customerID), // Use formatCID
-                      safeVal(row.itemID), safeVal(row.itemName), safeVal(row.quantity),
-                      safeVal(calcPoints),
-                      showDev ? safeVal(row.originalDeveloper) : '',
-                      showDev ? safeVal(devPoints) : ''
-                  ], 'data');
-              });
-              rRow++;
-          });
+                  rows.push({
+                      ...row,
+                      actualSellerPoints: sellerPoints,
+                      devPoints: devPoints
+                  });
+              }
+          }
+      });
+      
+      if (rows.length > 0) {
+          matrixData[sellerName] = rows.sort((a, b) => a.date.localeCompare(b.date));
       }
+  }
+
+  // Create Sheet if data exists
+  if (Object.keys(matrixData).length > 0) {
+      const repSheet = outWorkbook.addWorksheet("回購總表");
+      const sortedDevs = Array.from(developersSet).sort();
+
+      // Define Columns Widths
+      // Base: 7 cols (A-G) + Developers
+      const cols: Partial<ExcelJS.Column>[] = [
+          { width: 20 }, // Category (Seller Name header goes here)
+          { width: 12 }, // Date
+          { width: 15 }, // CustomerID
+          { width: 15 }, // ItemID
+          { width: 30 }, // ItemName
+          { width: 15 }, // Note
+          { width: 12 }, // Seller Points
+      ];
+      // Add Dev Columns
+      sortedDevs.forEach(() => cols.push({ width: 12 }));
+      repSheet.columns = cols;
+
+      // --- HEADER ROWS ---
+      // Row 1: Fixed Headers + "Original Developer" Merged Header
+      const headerRow1 = repSheet.addRow([
+          "分類", "日期", "客戶編號", "品項編號", "品名", "備註", "回購點數", "原開發者 (開發點數)"
+      ]);
+      // Merge "Original Developer" across all dev columns
+      if (sortedDevs.length > 0) {
+          // H1 is index 8 (1-based). 
+          // 1=A, 7=G, 8=H.
+          const startCol = 8;
+          const endCol = 8 + sortedDevs.length - 1;
+          if (endCol >= startCol) {
+              repSheet.mergeCells(1, startCol, 1, endCol);
+          }
+      }
+
+      // Row 2: Dev Names
+      const headerRow2Values = ["", "", "", "", "", "", ""]; // Spacers for A-G
+      sortedDevs.forEach(dev => headerRow2Values.push(dev));
+      const headerRow2 = repSheet.addRow(headerRow2Values);
+
+      // Styling Headers
+      [headerRow1, headerRow2].forEach(row => {
+          row.font = { bold: true };
+          row.alignment = { horizontal: 'center', vertical: 'middle' };
+          row.eachCell((cell, colNum) => {
+              if (colNum <= 7) {
+                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } }; // Slate-200
+              } else {
+                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDD6FE' } }; // Purple-100
+              }
+              cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+          });
+      });
+      // Specific style for "Repurchase Points" header (Col 7)
+      headerRow1.getCell(7).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } }; // Amber-50
+      headerRow1.getCell(7).font = { bold: true, color: { argb: 'FFB45309' } }; // Amber-700
+      
+      // --- DATA ROWS ---
+      Object.keys(matrixData).sort().forEach(sellerName => {
+          const rows = matrixData[sellerName];
+          const colorClass = getStoreColorARGB(sellerName); // Helper to get color
+
+          // Section Header Row (Seller Name)
+          const sectionRow = repSheet.addRow([sellerName]);
+          repSheet.mergeCells(sectionRow.number, 1, sectionRow.number, 7 + sortedDevs.length);
+          sectionRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } }; // Slate-100
+          sectionRow.getCell(1).font = { bold: true, size: 12 };
+          sectionRow.getCell(1).border = { top: {style:'medium'}, bottom: {style:'medium'} };
+
+          // Iterate Items
+          rows.forEach(row => {
+              const isReturn = row.status === Stage1Status.RETURN;
+              const textColor = isReturn ? 'FFDC2626' : 'FF000000'; // Red : Black
+
+              const rowValues = [
+                  row.category,
+                  row.date,
+                  formatCID(row.customerID),
+                  row.itemID,
+                  row.itemName,
+                  safeVal(row.repurchaseType),
+                  row.actualSellerPoints
+              ];
+
+              // Add Dev Points cells
+              sortedDevs.forEach(dev => {
+                  if (dev === row.originalDeveloper) {
+                      rowValues.push(row.devPoints);
+                  } else {
+                      rowValues.push('');
+                  }
+              });
+
+              const r = repSheet.addRow(rowValues);
+              
+              // Styling Row
+              r.eachCell((cell, colNum) => {
+                  cell.font = { color: { argb: textColor } };
+                  cell.border = { bottom: { style: 'dotted', color: { argb: 'FFCBD5E1' } } };
+                  
+                  // Highlight Seller Points (Col 7)
+                  if (colNum === 7) {
+                      cell.font = { bold: true, color: { argb: isReturn ? 'FFDC2626' : 'FFB45309' } };
+                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } };
+                  }
+                  
+                  // Highlight Target Dev Point Cell
+                  if (colNum > 7) {
+                       const devName = sortedDevs[colNum - 8];
+                       if (devName === row.originalDeveloper) {
+                            cell.font = { bold: true, color: { argb: isReturn ? 'FFDC2626' : 'FF6D28D9' } }; // Purple-700
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } }; // Purple-50
+                       }
+                  }
+              });
+          });
+          
+          // Subtotal Row
+          const totalSeller = rows.reduce((acc, r) => acc + r.actualSellerPoints, 0);
+          const subTotalValues = ["", "", "", "", "", `${sellerName} 小計:`, totalSeller];
+          sortedDevs.forEach(dev => {
+              const devTotal = rows.reduce((acc, r) => r.originalDeveloper === dev ? acc + r.devPoints : acc, 0);
+              subTotalValues.push(devTotal === 0 ? '' : devTotal as any);
+          });
+          
+          const subRow = repSheet.addRow(subTotalValues);
+          subRow.font = { bold: true };
+          subRow.getCell(6).alignment = { horizontal: 'right' };
+          subRow.getCell(7).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } };
+          subRow.eachCell((cell, colNum) => {
+              cell.border = { top: { style: 'double' } };
+              if (colNum > 7 && cell.value) {
+                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } };
+              }
+          });
+          
+          // Add spacer
+          repSheet.addRow([]);
+      });
   }
 
   const buffer = await outWorkbook.xlsx.writeBuffer();
@@ -626,6 +638,12 @@ export const exportToExcel = async (
   anchor.click();
   window.URL.revokeObjectURL(url);
 };
+
+// Helper: Get ARGB color from string hash (Simple version matching Preview colors roughly)
+function getStoreColorARGB(name: string): string {
+    // Just return a standard dark grey for text in Excel, background logic is handled above
+    return 'FF334155';
+}
 
 // Helper: Copy Sheet Structure (Columns, Merges, Styles)
 function copySheetModel(source: ExcelJS.Worksheet, target: ExcelJS.Worksheet, maxRow: number = 20) {
