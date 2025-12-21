@@ -548,14 +548,47 @@ export const exportToExcel = async (
       // --- DATA ROWS ---
       Object.keys(matrixData).sort().forEach(sellerName => {
           const rows = matrixData[sellerName];
-          const colorClass = getStoreColorARGB(sellerName); // Helper to get color
+          // Calculate Totals for Header Row
+          const totalSeller = rows.reduce((acc, r) => acc + r.actualSellerPoints, 0);
+          
+          // Construct Section Header (Combined with Totals)
+          // [Seller Name (Merged A-F), TotalSeller (G), ...DevTotals (H+)]
+          const sectionRowValues: any[] = [sellerName, "", "", "", "", "", totalSeller];
+          sortedDevs.forEach(dev => {
+              const devTotal = rows.reduce((acc, r) => r.originalDeveloper === dev ? acc + r.devPoints : acc, 0);
+              sectionRowValues.push(devTotal === 0 ? '' : devTotal);
+          });
 
-          // Section Header Row (Seller Name)
-          const sectionRow = repSheet.addRow([sellerName]);
-          repSheet.mergeCells(sectionRow.number, 1, sectionRow.number, 7 + sortedDevs.length);
-          sectionRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } }; // Slate-100
-          sectionRow.getCell(1).font = { bold: true, size: 12 };
-          sectionRow.getCell(1).border = { top: {style:'medium'}, bottom: {style:'medium'} };
+          // Section Header Row
+          const sectionRow = repSheet.addRow(sectionRowValues);
+          
+          // Merge Name Cell (A-F = 1-6)
+          repSheet.mergeCells(sectionRow.number, 1, sectionRow.number, 6);
+          
+          // Style Name Cell
+          const nameCell = sectionRow.getCell(1);
+          nameCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } }; // Slate-100
+          nameCell.font = { bold: true, size: 12 };
+          nameCell.border = { top: {style:'medium'}, bottom: {style:'medium'}, right: {style: 'thin'} };
+
+          // Style Total Cells (Starting from G=7)
+          sectionRow.eachCell((cell, colNum) => {
+              if (colNum >= 7) {
+                  cell.font = { bold: true };
+                  cell.alignment = { horizontal: 'right' };
+                  cell.border = { top: {style:'medium'}, bottom: {style:'medium'} };
+                  
+                  if (colNum === 7) { // Seller Total
+                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } }; // Amber-50
+                      cell.font = { bold: true, color: { argb: 'FFB45309' } };
+                  } else { // Dev Totals
+                      if (cell.value) { // Only highlight if value > 0
+                          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } }; // Purple-50
+                          cell.font = { bold: true, color: { argb: 'FF6D28D9' } };
+                      }
+                  }
+              }
+          });
 
           // Iterate Items
           rows.forEach(row => {
@@ -605,26 +638,7 @@ export const exportToExcel = async (
               });
           });
           
-          // Subtotal Row
-          const totalSeller = rows.reduce((acc, r) => acc + r.actualSellerPoints, 0);
-          const subTotalValues = ["", "", "", "", "", `${sellerName} 小計:`, totalSeller];
-          sortedDevs.forEach(dev => {
-              const devTotal = rows.reduce((acc, r) => r.originalDeveloper === dev ? acc + r.devPoints : acc, 0);
-              subTotalValues.push(devTotal === 0 ? '' : devTotal as any);
-          });
-          
-          const subRow = repSheet.addRow(subTotalValues);
-          subRow.font = { bold: true };
-          subRow.getCell(6).alignment = { horizontal: 'right' };
-          subRow.getCell(7).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } };
-          subRow.eachCell((cell, colNum) => {
-              cell.border = { top: { style: 'double' } };
-              if (colNum > 7 && cell.value) {
-                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } };
-              }
-          });
-          
-          // Add spacer
+          // Spacer Row (No bottom subtotal anymore)
           repSheet.addRow([]);
       });
   }

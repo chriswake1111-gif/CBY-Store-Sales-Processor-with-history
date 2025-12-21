@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { ProcessedData, Stage1Status, RepurchaseOption, StaffRecord, Stage1Row } from '../types';
 import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp, Undo2, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown, RefreshCcw } from 'lucide-react';
@@ -219,20 +220,13 @@ const DataViewer: React.FC<DataViewerProps> = ({
 
       // 2. Add Incoming Returns (Penalties from others) to Dev score
       incomingReturns.forEach(row => {
-           // We are the target, so we take the hit.
-           // Recalculate based on OUR role (context is us)
-           // But recalculateStage1Points usually uses row data. 
-           // The simple addition here works because 'calculatedPoints' for a return is usually negative.
-           // However, we need to ensure we use the correct logic for ME taking the hit.
-           // If I am the target, I act as the "Original Seller".
-           // The standard recalculate logic for RETURN status handles the 50% split if 'originalDeveloper' is present on the row.
            const points = recalculateStage1Points(row, currentData.role);
            dev += points;
       });
 
       // 3. Calculate Table Development (Bonuses from being Original Developer)
       let tableDev = 0;
-      Object.values(fullProcessedData).forEach(personData => {
+      Object.values(fullProcessedData).forEach((personData: ProcessedData[string]) => {
           personData.stage1.forEach(row => {
               if (row.originalDeveloper === activePerson) {
                   if (row.status === Stage1Status.REPURCHASE) {
@@ -266,7 +260,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
       const developersSet = new Set<string>();
       const groupedData: Record<string, RepurchaseRowData[]> = {};
 
-      Object.entries(fullProcessedData).forEach(([sellerName, sellerData]) => {
+      Object.entries(fullProcessedData).forEach(([sellerName, sellerData]: [string, ProcessedData[string]]) => {
           sellerData.stage1.forEach(row => {
               const isRepurchase = row.status === Stage1Status.REPURCHASE;
               const isReturnSplit = row.status === Stage1Status.RETURN && row.originalDeveloper && row.originalDeveloper !== '無';
@@ -367,7 +361,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
   return (
     <div ref={rootRef} className="flex flex-col h-full bg-white relative text-sm">
       
-      {/* Top Controls */}
+      {/* Top Controls (unchanged) */}
       <div className="border-b border-gray-300 bg-gray-50 p-2 shrink-0 flex flex-col gap-2">
          {/* Person Bar */}
          <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar items-center border-b border-gray-200 mb-1">
@@ -469,7 +463,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
       {/* Content Table Area */}
       <div className="flex-1 overflow-auto bg-white border-t border-gray-300">
         
-        {/* === STAGE 1 === */}
+        {/* === STAGE 1 === (Unchanged) */}
         {activeTab === 'stage1' && (
           <>
             <table className="w-full text-sm text-left whitespace-nowrap border-collapse">
@@ -564,7 +558,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
                 })}
               </tbody>
             </table>
-            {/* Portals ... */}
+            {/* Portals ... (unchanged) */}
             {popoverState && createPortal(
                 <div ref={popoverRef} className="fixed z-[100] bg-white rounded-lg shadow-xl border border-slate-200 p-3 w-64 animate-in fade-in zoom-in-95 duration-100" style={{ left: popoverState.x, top: popoverState.y }}>
                     <div className="text-xs font-bold text-gray-500 mb-2 pb-1 border-b">選擇回購狀態</div>
@@ -643,15 +637,36 @@ const DataViewer: React.FC<DataViewerProps> = ({
                      <tbody>
                         {Object.keys(repurchaseMatrix.dataBySeller).sort().map(sellerName => {
                              const rows = repurchaseMatrix.dataBySeller[sellerName];
+                             
+                             // Calculate totals for the header row
+                             const totalSellerPoints = rows.reduce((sum, r) => sum + r.actualSellerPoints, 0);
+                             const devTotals: Record<string, number> = {};
+                             repurchaseMatrix.developers.forEach(dev => {
+                                 devTotals[dev] = rows.reduce((sum, r) => r.originalDeveloper === dev ? sum + r.devPoints : sum, 0);
+                             });
+
                              return (
                                  <React.Fragment key={sellerName}>
-                                     {/* Section Header */}
+                                     {/* Section Header Row with Totals */}
                                      <tr className="bg-slate-200/80 font-bold border-b border-slate-300">
-                                         <td colSpan={7 + repurchaseMatrix.developers.length} className="px-3 py-1.5 text-slate-800 flex items-center gap-2">
-                                             <div className={`w-2 h-2 rounded-full ${getStoreColorClass(sellerName).split(' ')[0]}`}></div>
-                                             {sellerName}
+                                         <td colSpan={6} className="px-3 py-1.5 text-slate-800 border-r border-slate-300">
+                                             <div className="flex items-center gap-2">
+                                                <div className={`w-2 h-2 rounded-full ${getStoreColorClass(sellerName).split(' ')[0]}`}></div>
+                                                {sellerName}
+                                             </div>
                                          </td>
+                                         {/* Total Seller Points */}
+                                         <td className="px-2 py-1 text-right font-mono font-bold text-amber-700 bg-amber-100/50 border-r border-slate-300">
+                                             {totalSellerPoints}
+                                         </td>
+                                         {/* Total Developer Points */}
+                                         {repurchaseMatrix.developers.map(dev => (
+                                              <td key={dev} className="px-2 py-1 text-right font-mono font-bold text-purple-700 bg-purple-100/50 border-r border-slate-300">
+                                                  {devTotals[dev]}
+                                              </td>
+                                         ))}
                                      </tr>
+                                     
                                      {/* Data Rows */}
                                      {rows.map(row => {
                                          const isReturn = row.status === Stage1Status.RETURN;
@@ -685,19 +700,10 @@ const DataViewer: React.FC<DataViewerProps> = ({
                                              </tr>
                                          );
                                      })}
-                                     {/* Section Summary (Optional) */}
-                                     <tr className="bg-gray-50 border-t-2 border-slate-300 border-b-2">
-                                         <td colSpan={6} className="px-2 py-1 text-right text-xs font-bold text-gray-500">
-                                             {sellerName} 小計:
-                                         </td>
-                                         <td className="px-2 py-1 text-right font-mono font-bold text-amber-700 bg-amber-50">
-                                             {rows.reduce((sum, r) => sum + r.actualSellerPoints, 0)}
-                                         </td>
-                                         {repurchaseMatrix.developers.map(dev => (
-                                              <td key={dev} className="px-2 py-1 text-right font-mono font-bold text-purple-700 bg-purple-50">
-                                                  {rows.reduce((sum, r) => r.originalDeveloper === dev ? sum + r.devPoints : sum, 0)}
-                                              </td>
-                                         ))}
+                                     
+                                     {/* Spacing Row */}
+                                     <tr className="bg-gray-50 h-2 border-t border-slate-200 border-b border-slate-300">
+                                         <td colSpan={7 + repurchaseMatrix.developers.length}></td>
                                      </tr>
                                  </React.Fragment>
                              );
@@ -709,8 +715,9 @@ const DataViewer: React.FC<DataViewerProps> = ({
            </div>
         )}
 
-        {/* ... (Stage 2 and 3 code remains identical) ... */}
+        {/* ... (Rest of DataViewer) ... */}
         {activeTab === 'stage2' && (
+          // ... (Stage 2 implementation unchanged) ...
           isPharm ? (
             <div className="flex flex-col h-full">
               <div className="bg-white px-4 py-3 border-b border-gray-300 shadow-sm shrink-0">
@@ -817,6 +824,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
           )
         )}
 
+        {/* ... (Stage 3) ... */}
         {activeTab === 'stage3' && !isPharm && (
           <div className="p-4 flex justify-center h-full items-start bg-slate-50">
              {/* Stage 3 content same as before */}
