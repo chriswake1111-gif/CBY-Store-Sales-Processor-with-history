@@ -1,9 +1,10 @@
 
 import React, { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { ProcessedData, Stage1Status, RepurchaseOption, StaffRecord, Stage1Row } from '../types';
-import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp, Undo2, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp, Undo2, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown, RefreshCcw } from 'lucide-react';
 import { createPortal } from 'react-dom';
-import { getItemHistory, HistoryRecord } from '../utils/db'; // Import History Logic
+import { getItemHistory, HistoryRecord } from '../utils/db'; 
+import { recalculateStage1Points } from '../utils/processor'; // Need calculation logic
 
 interface DataViewerProps {
   sortedPeople: string[];
@@ -12,18 +13,17 @@ interface DataViewerProps {
   activePerson: string;
   setActivePerson: (person: string) => void;
   currentData: ProcessedData[string] | null;
-  activeTab: 'stage1' | 'stage2' | 'stage3';
-  setActiveTab: (tab: 'stage1' | 'stage2' | 'stage3') => void;
+  activeTab: 'stage1' | 'stage2' | 'stage3' | 'repurchase'; // Added repurchase
+  setActiveTab: (tab: 'stage1' | 'stage2' | 'stage3' | 'repurchase') => void;
   stage1TotalPoints: number;
   handleStatusChangeStage1: (id: string, newStatus: Stage1Status) => void;
   handleToggleDeleteStage2: (id: string) => void;
   handleUpdateStage2CustomReward: (id: string, val: string) => void;
-  // New Props
   handleUpdateStage1Action2: (id: string, field: 'originalDeveloper' | 'repurchaseType' | 'returnTarget', val: string) => void;
   repurchaseOptions: RepurchaseOption[];
   allActiveStaff: string[];
   staffRecord?: StaffRecord;
-  fullProcessedData?: ProcessedData; // Added for Incoming Return Injection
+  fullProcessedData?: ProcessedData; 
   
   onClose?: () => void;
 }
@@ -39,113 +39,71 @@ const DataViewer: React.FC<DataViewerProps> = ({
   onClose
 }) => {
   
-  // Ref to the main container to determine which Document/Window we are in (Main or Popout)
   const rootRef = useRef<HTMLDivElement>(null);
-
-  // Popover State for Repurchase Options
   const [popoverState, setPopoverState] = useState<{ rowId: string, x: number, y: number } | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-
-  // Popover State for History View
   const [historyState, setHistoryState] = useState<{ x: number, y: number, records: HistoryRecord[], loading: boolean, targetRowId: string, targetCid: string, targetItemId: string, mode: 'dev' | 'seller' } | null>(null);
   const historyRef = useRef<HTMLDivElement>(null);
-
-  // Sorting State
   const [sortConfig, setSortConfig] = useState<{ key: SortKey, direction: SortDirection }>({ key: null, direction: 'asc' });
 
-  // Helper to get the correct document/window context (fixes Popout issues)
   const getContext = () => {
     const doc = rootRef.current?.ownerDocument || document;
     const win = doc.defaultView || window;
     return { doc, win };
   };
 
-  // Close when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      // Close Repurchase Option Popover
       if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
         setPopoverState(null);
       }
-      // Close History Popover
       if (historyRef.current && !historyRef.current.contains(event.target as Node)) {
         setHistoryState(null);
       }
     };
-    
-    // Attach listener to the correct document (Main or Popout)
     const { doc } = getContext();
     if (popoverState || historyState) doc.addEventListener('mousedown', handleClickOutside);
-    
     return () => doc.removeEventListener('mousedown', handleClickOutside);
   }, [popoverState, historyState]);
 
-  // Adjust Position Logic for Repurchase Popover
   useLayoutEffect(() => {
-    if (popoverState && popoverRef.current) {
-        adjustPosition(popoverRef.current, popoverState.x, popoverState.y);
-    }
+    if (popoverState && popoverRef.current) adjustPosition(popoverRef.current, popoverState.x, popoverState.y);
   }, [popoverState]);
 
-  // Adjust Position Logic for History Popover
   useLayoutEffect(() => {
-    if (historyState && historyRef.current) {
-        adjustPosition(historyRef.current, historyState.x, historyState.y);
-    }
+    if (historyState && historyRef.current) adjustPosition(historyRef.current, historyState.x, historyState.y);
   }, [historyState]);
 
-  // Reset sorting when changing person
   useEffect(() => {
       setSortConfig({ key: null, direction: 'asc' });
   }, [activePerson]);
 
   const adjustPosition = (el: HTMLElement, targetX: number, targetY: number) => {
         const { width, height } = el.getBoundingClientRect();
-        
-        // Use the window dimensions of the context where the element is rendered
         const currentWindow = el.ownerDocument.defaultView || window;
         const viewportWidth = currentWindow.innerWidth;
         const viewportHeight = currentWindow.innerHeight;
-
         let newX = targetX;
         let newY = targetY;
-
-        // Check Right Edge
-        if (newX + width > viewportWidth) {
-            newX = newX - width - 20; 
-        }
-        // Check Bottom Edge
-        if (newY + height > viewportHeight) {
-            newY = newY - height - 20; 
-        }
-
+        if (newX + width > viewportWidth) newX = newX - width - 20; 
+        if (newY + height > viewportHeight) newY = newY - height - 20; 
         el.style.left = `${newX}px`;
         el.style.top = `${newY}px`;
   };
 
   const openPopover = (e: React.MouseEvent, rowId: string) => {
     e.stopPropagation();
-    // Close other popover if open
     setHistoryState(null); 
     setPopoverState({ rowId, x: e.clientX + 10, y: e.clientY + 10 });
   };
 
   const openHistoryAndSelect = async (e: React.MouseEvent, customerID: string, itemID: string, rowId: string, mode: 'dev' | 'seller') => {
       e.stopPropagation();
-      setPopoverState(null); // Close other popover
-
-      // Set Loading State
+      setPopoverState(null); 
       setHistoryState({ 
-          x: e.clientX + 10, 
-          y: e.clientY + 10, 
-          records: [], 
-          loading: true, 
-          targetRowId: rowId,
-          targetCid: customerID,
-          targetItemId: itemID,
-          mode
+          x: e.clientX + 10, y: e.clientY + 10, records: [], loading: true, 
+          targetRowId: rowId, targetCid: customerID, targetItemId: itemID, mode
       });
-
       try {
           const records = await getItemHistory(customerID, itemID);
           setHistoryState(prev => prev ? { ...prev, records, loading: false } : null);
@@ -170,14 +128,9 @@ const DataViewer: React.FC<DataViewerProps> = ({
     }
   };
 
-  // --- Sorting Logic ---
   const handleSort = (key: SortKey) => {
       setSortConfig(current => {
-          if (current.key === key) {
-              // Toggle direction
-              return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
-          }
-          // New key, default asc
+          if (current.key === key) return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
           return { key, direction: 'asc' };
       });
   };
@@ -192,24 +145,10 @@ const DataViewer: React.FC<DataViewerProps> = ({
   };
 
   const getStoreColorClass = (name: string) => {
-      const colors = [
-        'bg-red-100 text-red-700 border-red-200',
-        'bg-orange-100 text-orange-700 border-orange-200',
-        'bg-amber-100 text-amber-700 border-amber-200',
-        'bg-green-100 text-green-700 border-green-200',
-        'bg-teal-100 text-teal-700 border-teal-200',
-        'bg-cyan-100 text-cyan-700 border-cyan-200',
-        'bg-blue-100 text-blue-700 border-blue-200',
-        'bg-indigo-100 text-indigo-700 border-indigo-200',
-        'bg-violet-100 text-violet-700 border-violet-200',
-        'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200',
-        'bg-pink-100 text-pink-700 border-pink-200',
-        'bg-rose-100 text-rose-700 border-rose-200',
-      ];
+      const colors = ['bg-red-100 text-red-700','bg-orange-100 text-orange-700','bg-amber-100 text-amber-700','bg-green-100 text-green-700','bg-teal-100 text-teal-700','bg-cyan-100 text-cyan-700','bg-blue-100 text-blue-700','bg-indigo-100 text-indigo-700','bg-violet-100 text-violet-700','bg-fuchsia-100 text-fuchsia-700','bg-pink-100 text-pink-700','bg-rose-100 text-rose-700'];
       let hash = 0;
       for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-      const index = Math.abs(hash) % colors.length;
-      return colors[index];
+      return colors[Math.abs(hash) % colors.length];
   };
 
   const stage2Totals = useMemo(() => {
@@ -226,16 +165,13 @@ const DataViewer: React.FC<DataViewerProps> = ({
     }, { cash: 0, vouchers: 0 }) || { cash: 0, vouchers: 0 };
   }, [currentData?.stage2, currentData?.role]);
 
-  // Pharmacist Bonus Calculation
   const pharmacistBonus = useMemo(() => {
      if (currentData?.role !== 'PHARMACIST') return 0;
-     const dispensingRow = currentData.stage2.find(r => r.itemID === '001727'); // 自費調劑 ID
+     const dispensingRow = currentData.stage2.find(r => r.itemID === '001727'); 
      const qty = dispensingRow ? dispensingRow.quantity : 0;
-     const bonus = (qty - 300) * 10;
-     return bonus > 0 ? bonus : 0;
+     return Math.max(0, (qty - 300) * 10);
   }, [currentData?.stage2, currentData?.role]);
 
-  // Aggregate Incoming Returns
   const incomingReturns = useMemo(() => {
       if (!fullProcessedData || !activePerson) return [];
       const incoming: Stage1Row[] = [];
@@ -243,7 +179,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
           if (otherPerson === activePerson) return;
           fullProcessedData[otherPerson].stage1.forEach(row => {
               if (row.status === Stage1Status.RETURN && row.returnTarget === activePerson) {
-                  // Clone row to avoid mutation issues in render if needed, but here simple reference is fine for display
                   incoming.push(row);
               }
           });
@@ -255,6 +190,78 @@ const DataViewer: React.FC<DataViewerProps> = ({
     if (!id) return '';
     return id.startsWith('00') ? id.substring(2) : id;
   };
+
+  // --- REPURCHASE SUMMARY LOGIC ---
+  interface RepurchaseRowData extends Stage1Row {
+      devPoints: number;
+      actualSellerPoints: number;
+  }
+
+  // 1. Gather all repurchase data from everyone
+  const repurchaseMatrix = useMemo(() => {
+      if (!fullProcessedData) return { developers: [], dataBySeller: {} };
+
+      const developersSet = new Set<string>();
+      const groupedData: Record<string, RepurchaseRowData[]> = {};
+
+      Object.keys(fullProcessedData).forEach(sellerName => {
+          const sellerData = fullProcessedData[sellerName];
+          sellerData.stage1.forEach(row => {
+              // Valid Repurchase Logic:
+              // 1. Status is REPURCHASE
+              // 2. OR Status is RETURN and has originalDeveloper set (Split logic)
+              const isRepurchase = row.status === Stage1Status.REPURCHASE;
+              const isReturnSplit = row.status === Stage1Status.RETURN && row.originalDeveloper && row.originalDeveloper !== '無';
+              
+              if (isRepurchase || isReturnSplit) {
+                  const dev = row.originalDeveloper;
+                  if (dev) {
+                      developersSet.add(dev);
+
+                      if (!groupedData[sellerName]) groupedData[sellerName] = [];
+                      
+                      // Calculate Points Logic
+                      let fullPoints = 0;
+                      let sellerPoints = row.calculatedPoints; // Usually 50%
+                      let devPoints = 0;
+
+                      if (isReturnSplit) {
+                           // For Returns:
+                           // sellerPoints is already calculated as the seller's share (e.g. -1)
+                           // We need full deduction to find Dev's share
+                           fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, sellerData.role);
+                           // Dev Share = Total - Seller Share (e.g. -3 - (-1) = -2)
+                           devPoints = fullPoints - sellerPoints;
+                      } else {
+                           // For Sales:
+                           // sellerPoints is 50%
+                           // fullPoints is 100% (Calculate as if it was DEVELOP status)
+                           fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, sellerData.role);
+                           devPoints = fullPoints - sellerPoints;
+                      }
+                      
+                      groupedData[sellerName].push({
+                          ...row,
+                          actualSellerPoints: sellerPoints,
+                          devPoints: devPoints
+                      });
+                  }
+              }
+          });
+      });
+
+      // Sort Developers to keep columns consistent
+      const sortedDevelopers = Array.from(developersSet).sort();
+      
+      // Sort Rows within each seller by date
+      Object.keys(groupedData).forEach(key => {
+          groupedData[key].sort((a, b) => a.date.localeCompare(b.date));
+      });
+
+      return { developers: sortedDevelopers, dataBySeller: groupedData };
+
+  }, [fullProcessedData]);
+
 
   if (!currentData) {
     return (
@@ -275,36 +282,25 @@ const DataViewer: React.FC<DataViewerProps> = ({
 
   const tabs = [
     { id: 'stage1', label: '點數表', count: `${stage1TotalPoints}`, icon: <Coins size={12}/> },
-    { id: 'stage2', label: getStage2Label(), count: isPharm ? '' : `${currentData.stage2.filter(r => !r.isDeleted).length}`, icon: <Pill size={12}/> }
+    { id: 'stage2', label: getStage2Label(), count: isPharm ? '' : `${currentData.stage2.filter(r => !r.isDeleted).length}`, icon: <Pill size={12}/> },
+    // Only Sales show Stage 3
+    ...(isPharm ? [] : [{ id: 'stage3', label: '美妝金額', count: `${currentData.stage3.total.toLocaleString()}`, icon: <Package size={12}/> }]),
+    // Repurchase Tab (Global)
+    { id: 'repurchase', label: '回購總表', count: '', icon: <RefreshCcw size={12}/> }
   ];
-
-  if (!isPharm) {
-    tabs.push({ id: 'stage3', label: '美妝金額', count: `${currentData.stage3.total.toLocaleString()}`, icon: <Package size={12}/> });
-  }
 
   const genOpts = repurchaseOptions.filter(o => o.isEnabled && o.group === 'GENERAL');
   const specOpts = repurchaseOptions.filter(o => o.isEnabled && o.group === 'SPECIAL');
 
-  // Combined List for Stage 1: Own Data + Incoming Returns
-  // Note: Incoming returns are displayed at the end in default sort
   const combinedStage1 = [...currentData.stage1, ...incomingReturns];
 
-  // Apply Sorting for Display
   const sortedStage1 = useMemo(() => {
       if (!sortConfig.key) return combinedStage1;
-
       return [...combinedStage1].sort((a, b) => {
           let valA: string | number = '';
           let valB: string | number = '';
-
-          if (sortConfig.key === 'date') {
-              valA = a.date;
-              valB = b.date;
-          } else if (sortConfig.key === 'customerID') {
-              valA = a.customerID;
-              valB = b.customerID;
-          }
-
+          if (sortConfig.key === 'date') { valA = a.date; valB = b.date; } 
+          else if (sortConfig.key === 'customerID') { valA = a.customerID; valB = b.customerID; }
           if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
           if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
           return 0;
@@ -363,27 +359,19 @@ const DataViewer: React.FC<DataViewerProps> = ({
                     </div>
                 </div>
                 
-                {/* Performance Targets Badge Section */}
+                {/* Targets Badge */}
                 {(staffRecord?.pointsStandard || staffRecord?.cosmeticStandard) && (
                     <div className="ml-6 flex items-center gap-3">
                          {staffRecord.pointsStandard !== undefined && (
                              <div className="bg-white px-2.5 py-1 rounded border border-gray-200 shadow-sm flex flex-col items-center">
-                                 <div className="text-[8px] text-gray-400 font-black uppercase flex items-center gap-1">
-                                    <TrendingUp size={8}/> Points Target
-                                 </div>
-                                 <div className="text-xs font-mono font-black text-blue-700">
-                                    {staffRecord.pointsStandard.toLocaleString()}
-                                 </div>
+                                 <div className="text-[8px] text-gray-400 font-black uppercase flex items-center gap-1"><TrendingUp size={8}/> Points Target</div>
+                                 <div className="text-xs font-mono font-black text-blue-700">{staffRecord.pointsStandard.toLocaleString()}</div>
                              </div>
                          )}
                          {staffRecord.cosmeticStandard !== undefined && (
                              <div className="bg-white px-2.5 py-1 rounded border border-gray-200 shadow-sm flex flex-col items-center">
-                                 <div className="text-[8px] text-gray-400 font-black uppercase flex items-center gap-1">
-                                    <Package size={8}/> Cosmetic Target
-                                 </div>
-                                 <div className="text-xs font-mono font-black text-emerald-700">
-                                    ${staffRecord.cosmeticStandard.toLocaleString()}
-                                 </div>
+                                 <div className="text-[8px] text-gray-400 font-black uppercase flex items-center gap-1"><Package size={8}/> Cosmetic Target</div>
+                                 <div className="text-xs font-mono font-black text-emerald-700">${staffRecord.cosmeticStandard.toLocaleString()}</div>
                              </div>
                          )}
                     </div>
@@ -423,48 +411,24 @@ const DataViewer: React.FC<DataViewerProps> = ({
 
       {/* Content Table Area */}
       <div className="flex-1 overflow-auto bg-white border-t border-gray-300">
+        
+        {/* === STAGE 1 === */}
         {activeTab === 'stage1' && (
           <>
             <table className="w-full text-sm text-left whitespace-nowrap border-collapse">
-              <thead className="bg-slate-100 sticky top-0 z-10 text-slate-700">
+              <thead className="bg-slate-100 sticky top-0 z-10 text-slate-700 shadow-sm">
                 <tr>
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 w-24 bg-slate-100">Action</th>
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 w-48 bg-slate-100">Action 2 (原開發/原銷售)</th>
-                  
-                  {/* Category: Click to Reset Sort */}
-                  <th 
-                    onClick={handleResetSort}
-                    className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100 cursor-pointer hover:bg-slate-200 transition-colors group"
-                    title="點擊恢復原始排序"
-                  >
-                    <div className="flex items-center gap-1">
-                        分類
-                        {sortConfig.key !== null && <Undo2 size={10} className="text-red-500 animate-in fade-in"/>}
-                    </div>
+                  <th onClick={handleResetSort} className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100 cursor-pointer hover:bg-slate-200 transition-colors group">
+                    <div className="flex items-center gap-1">分類{sortConfig.key !== null && <Undo2 size={10} className="text-red-500 animate-in fade-in"/>}</div>
                   </th>
-
-                  {/* Date: Sortable */}
-                  <th 
-                    onClick={() => handleSort('date')}
-                    className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100 cursor-pointer hover:bg-slate-200 transition-colors select-none"
-                  >
-                    <div className="flex items-center gap-1">
-                        日期
-                        {getSortIcon('date')}
-                    </div>
+                  <th onClick={() => handleSort('date')} className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100 cursor-pointer hover:bg-slate-200 transition-colors select-none">
+                    <div className="flex items-center gap-1">日期{getSortIcon('date')}</div>
                   </th>
-
-                  {/* CustomerID: Sortable */}
-                  <th 
-                    onClick={() => handleSort('customerID')}
-                    className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100 cursor-pointer hover:bg-slate-200 transition-colors select-none"
-                  >
-                    <div className="flex items-center gap-1">
-                        客戶編號
-                        {getSortIcon('customerID')}
-                    </div>
+                  <th onClick={() => handleSort('customerID')} className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100 cursor-pointer hover:bg-slate-200 transition-colors select-none">
+                    <div className="flex items-center gap-1">客戶編號{getSortIcon('customerID')}</div>
                   </th>
-
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">品項編號</th>
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">品名</th>
                   <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100 text-right">數量</th>
@@ -476,26 +440,17 @@ const DataViewer: React.FC<DataViewerProps> = ({
               <tbody>
                 {sortedStage1.map((row, idx) => {
                   const isIncoming = row.salesPerson !== activePerson;
-                  
                   const isDel = row.status === Stage1Status.DELETE;
                   const isRep = row.status === Stage1Status.REPURCHASE;
                   const isRet = row.status === Stage1Status.RETURN;
-                  
                   const isDispensing = isPharm && row.category === '調劑點數';
                   const isHiddenPoints = !isRet && row.category === '現金-小兒銷售';
-
-                  // Logic for Action 2 Availability:
-                  // Develop, Half-Year, Repurchase, Return all enable Action 2
                   const isAction2Active = !isDel && (isRep || isRet || row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR);
-
-                  // If Transferred Out (Soft Delete):
-                  // This row is owned by current person BUT has a returnTarget set.
                   const isTransferredOut = !isIncoming && !!row.returnTarget;
 
-                  // Styles
                   let rowBg = idx % 2 === 0 ? 'bg-white' : 'bg-slate-50';
-                  if (isIncoming) rowBg = 'bg-red-50/50'; // Incoming return
-                  if (isTransferredOut) rowBg = 'bg-gray-100/80'; // Transferred out
+                  if (isIncoming) rowBg = 'bg-red-50/50'; 
+                  if (isTransferredOut) rowBg = 'bg-gray-100/80';
 
                   let textClass = 'text-slate-700';
                   if (isDel) textClass = 'text-gray-300 line-through';
@@ -504,259 +459,197 @@ const DataViewer: React.FC<DataViewerProps> = ({
                   
                   return (
                     <tr key={`${row.id}_${isIncoming ? 'inc' : 'own'}`} className={`group hover:bg-yellow-50 ${rowBg}`}>
-                      {/* ACTION 1 */}
                       <td className="px-2 py-1 border border-slate-200 text-center align-top relative">
                          {isIncoming ? (
-                             <span className="text-[10px] text-red-500 font-bold flex items-center justify-center gap-1">
-                                 <ArrowRightLeft size={10}/> 轉入退貨
-                             </span>
+                             <span className="text-[10px] text-red-500 font-bold flex items-center justify-center gap-1"><ArrowRightLeft size={10}/> 轉入退貨</span>
                          ) : isDispensing ? (
-                          <button 
-                            onClick={() => handleStatusChangeStage1(row.id, isDel ? Stage1Status.DEVELOP : Stage1Status.DELETE)}
-                            className={`
-                              px-2 py-0.5 rounded text-[10px] font-bold border w-full
-                              ${isDel 
-                                  ? 'bg-white border-red-300 text-red-600 hover:bg-red-50' 
-                                  : 'bg-white border-slate-300 text-slate-600 hover:border-red-400 hover:text-red-600'}
-                            `}
-                          >
-                             {isDel ? '復原' : '刪除'}
-                          </button>
+                          <button onClick={() => handleStatusChangeStage1(row.id, isDel ? Stage1Status.DEVELOP : Stage1Status.DELETE)} className={`px-2 py-0.5 rounded text-[10px] font-bold border w-full ${isDel ? 'bg-white border-red-300 text-red-600 hover:bg-red-50' : 'bg-white border-slate-300 text-slate-600 hover:border-red-400 hover:text-red-600'}`}>{isDel ? '復原' : '刪除'}</button>
                         ) : (
-                          <select 
-                              value={row.status} 
-                              onChange={(e) => handleStatusChangeStage1(row.id, e.target.value as Stage1Status)}
-                              className={`
-                                  w-full border text-[11px] font-bold py-0.5 px-1 rounded-sm focus:outline-none cursor-pointer
-                                  ${isRep ? 'bg-amber-100 text-amber-800 border-amber-300' : 
-                                    isRet ? 'bg-red-100 text-red-800 border-red-300' : 
-                                    isDel ? 'bg-gray-100 text-gray-400 border-gray-300' : 
-                                    'bg-white text-slate-700 border-slate-300 hover:border-blue-400'}
-                              `}
-                          >
-                              {/* If original quantity is negative, restrict options to RETURN / DELETE */}
-                              {row.quantity < 0 ? (
-                                  <>
-                                      <option value={Stage1Status.RETURN}>退貨</option>
-                                      <option value={Stage1Status.DELETE}>刪除</option>
-                                  </>
-                              ) : (
-                                  <>
-                                    <option value={Stage1Status.DEVELOP}>開發</option>
-                                    <option value={Stage1Status.HALF_YEAR}>隔半年</option>
-                                    <option value={Stage1Status.REPURCHASE}>回購</option>
-                                    <option value={Stage1Status.DELETE}>刪除</option>
-                                  </>
-                              )}
+                          <select value={row.status} onChange={(e) => handleStatusChangeStage1(row.id, e.target.value as Stage1Status)} className={`w-full border text-[11px] font-bold py-0.5 px-1 rounded-sm focus:outline-none cursor-pointer ${isRep ? 'bg-amber-100 text-amber-800 border-amber-300' : isRet ? 'bg-red-100 text-red-800 border-red-300' : isDel ? 'bg-gray-100 text-gray-400 border-gray-300' : 'bg-white text-slate-700 border-slate-300 hover:border-blue-400'}`}>
+                              {row.quantity < 0 ? (<><option value={Stage1Status.RETURN}>退貨</option><option value={Stage1Status.DELETE}>刪除</option></>) : (<><option value={Stage1Status.DEVELOP}>開發</option><option value={Stage1Status.HALF_YEAR}>隔半年</option><option value={Stage1Status.REPURCHASE}>回購</option><option value={Stage1Status.DELETE}>刪除</option></>)}
                           </select>
                         )}
                       </td>
-
-                      {/* ACTION 2 */}
                       <td className="px-2 py-1 border border-slate-200 align-top">
                         <div className={`flex gap-1 ${!isAction2Active || isIncoming ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
-                             
-                             {/* Original Developer Selector (Also used for normal Repurchase) */}
                              <div className="relative flex-1">
-                                <button
-                                    onClick={(e) => openHistoryAndSelect(e, row.customerID, row.itemID, row.id, 'dev')}
-                                    className={`
-                                      w-full text-[10px] border rounded px-1 py-0.5 text-left flex items-center justify-between
-                                      ${row.originalDeveloper && row.originalDeveloper !== '無' 
-                                          ? 'bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100' 
-                                          : 'bg-white border-gray-300 text-gray-500 hover:border-blue-400 hover:text-blue-600'}
-                                    `}
-                                    title="點擊選擇原開發者"
-                                >
+                                <button onClick={(e) => openHistoryAndSelect(e, row.customerID, row.itemID, row.id, 'dev')} className={`w-full text-[10px] border rounded px-1 py-0.5 text-left flex items-center justify-between ${row.originalDeveloper && row.originalDeveloper !== '無' ? 'bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100' : 'bg-white border-gray-300 text-gray-500 hover:border-blue-400 hover:text-blue-600'}`} title="點擊選擇原開發者">
                                     <span className="truncate">{row.originalDeveloper || '選擇開發'}</span>
                                     <UserPlus size={10} className="opacity-50 shrink-0 ml-1"/>
                                 </button>
                              </div>
-
-                             {/* Second Button: Depends on Type */}
                              {isRet ? (
-                                // For Returns: Original Seller Selector
                                 <div className="relative flex-1">
-                                    <button
-                                        onClick={(e) => openHistoryAndSelect(e, row.customerID, row.itemID, row.id, 'seller')}
-                                        className={`
-                                            w-full text-[10px] border rounded px-1 py-0.5 text-left flex items-center justify-between
-                                            ${row.returnTarget
-                                                ? 'bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100' 
-                                                : 'bg-white border-gray-300 text-gray-500 hover:border-red-400 hover:text-red-600'}
-                                        `}
-                                        title="選擇原銷售者 (轉出此筆資料)"
-                                    >
+                                    <button onClick={(e) => openHistoryAndSelect(e, row.customerID, row.itemID, row.id, 'seller')} className={`w-full text-[10px] border rounded px-1 py-0.5 text-left flex items-center justify-between ${row.returnTarget ? 'bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100' : 'bg-white border-gray-300 text-gray-500 hover:border-red-400 hover:text-red-600'}`} title="選擇原銷售者 (轉出此筆資料)">
                                         <span className="truncate">{row.returnTarget || '轉出對象'}</span>
                                         <ArrowRightLeft size={10} className="opacity-50 shrink-0 ml-1"/>
                                     </button>
                                 </div>
                              ) : (
-                                // For Sales: Repurchase Status
-                                <button 
-                                    onClick={(e) => openPopover(e, row.id)}
-                                    className={`
-                                        flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border truncate max-w-[80px]
-                                        ${row.repurchaseType ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'}
-                                    `}
-                                >
+                                <button onClick={(e) => openPopover(e, row.id)} className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border truncate max-w-[80px] ${row.repurchaseType ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'}`}>
                                     <ListPlus size={10} />
                                     <span className="truncate">{row.repurchaseType || '狀態'}</span>
                                 </button>
                              )}
                         </div>
                       </td>
-
-                      <td className={`px-2 py-1 border border-slate-200 ${textClass}`}>
-                          {row.category}
-                          {isIncoming && <div className="text-[9px] text-slate-400">From: {row.salesPerson}</div>}
-                      </td>
+                      <td className={`px-2 py-1 border border-slate-200 ${textClass}`}>{row.category}{isIncoming && <div className="text-[9px] text-slate-400">From: {row.salesPerson}</div>}</td>
                       <td className={`px-2 py-1 border border-slate-200 font-mono ${textClass}`}>{row.date}</td>
                       <td className={`px-2 py-1 border border-slate-200 font-mono ${textClass}`}>{formatCID(row.customerID)}</td>
-                      
-                      {/* Item ID - Plain Text now */}
-                      <td className={`px-2 py-1 border border-slate-200 font-mono text-[11px] ${textClass} ${!isDel && !isTransferredOut ? 'font-bold' : ''}`}>
-                         {row.itemID}
-                      </td>
-
+                      <td className={`px-2 py-1 border border-slate-200 font-mono text-[11px] ${textClass} ${!isDel && !isTransferredOut ? 'font-bold' : ''}`}>{row.itemID}</td>
                       <td className={`px-2 py-1 border border-slate-200 ${textClass}`}>{row.itemName}</td>
-
                       <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${textClass}`}>{row.quantity}</td>
                       <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${textClass}`}>{row.amount}</td>
                       <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${textClass}`}>{row.discountRatio}</td>
-
-                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono font-bold ${isDel || isTransferredOut ? 'text-gray-300' : isRep ? 'text-amber-600' : isRet ? 'text-red-600' : 'text-slate-900'}`}>
-                          {isDel || isTransferredOut ? 0 : (isHiddenPoints ? '-' : row.calculatedPoints)}
-                      </td>
+                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono font-bold ${isDel || isTransferredOut ? 'text-gray-300' : isRep ? 'text-amber-600' : isRet ? 'text-red-600' : 'text-slate-900'}`}>{isDel || isTransferredOut ? 0 : (isHiddenPoints ? '-' : row.calculatedPoints)}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-
-            {/* Repurchase Option Popover Portal */}
+            {/* Portals ... */}
             {popoverState && createPortal(
-                <div 
-                    ref={popoverRef}
-                    className="fixed z-[100] bg-white rounded-lg shadow-xl border border-slate-200 p-3 w-64 animate-in fade-in zoom-in-95 duration-100"
-                    style={{ left: popoverState.x, top: popoverState.y }}
-                >
+                <div ref={popoverRef} className="fixed z-[100] bg-white rounded-lg shadow-xl border border-slate-200 p-3 w-64 animate-in fade-in zoom-in-95 duration-100" style={{ left: popoverState.x, top: popoverState.y }}>
                     <div className="text-xs font-bold text-gray-500 mb-2 pb-1 border-b">選擇回購狀態</div>
                     <div className="space-y-3">
-                        {genOpts.length > 0 && (
-                            <div className="grid grid-cols-3 gap-1">
-                                {genOpts.map(o => (
-                                    <button key={o.id} onClick={() => handlePopoverSelect(o.label)} className="text-[10px] px-1 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 border border-blue-100 truncate">
-                                        {o.label}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                        {specOpts.length > 0 && (
-                             <div className="grid grid-cols-2 gap-1">
-                                {specOpts.map(o => (
-                                    <button key={o.id} onClick={() => handlePopoverSelect(o.label)} className="text-[10px] px-1 py-1 bg-purple-50 text-purple-700 rounded hover:bg-purple-100 border border-purple-100 truncate">
-                                        {o.label}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                         <button onClick={() => handlePopoverSelect('')} className="w-full mt-1 text-[10px] text-gray-400 hover:text-red-500 border border-transparent hover:border-red-100 rounded">清除狀態</button>
+                        {genOpts.length > 0 && <div className="grid grid-cols-3 gap-1">{genOpts.map(o => <button key={o.id} onClick={() => handlePopoverSelect(o.label)} className="text-[10px] px-1 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 border border-blue-100 truncate">{o.label}</button>)}</div>}
+                        {specOpts.length > 0 && <div className="grid grid-cols-2 gap-1">{specOpts.map(o => <button key={o.id} onClick={() => handlePopoverSelect(o.label)} className="text-[10px] px-1 py-1 bg-purple-50 text-purple-700 rounded hover:bg-purple-100 border border-purple-100 truncate">{o.label}</button>)}</div>}
+                        <button onClick={() => handlePopoverSelect('')} className="w-full mt-1 text-[10px] text-gray-400 hover:text-red-500 border border-transparent hover:border-red-100 rounded">清除狀態</button>
                     </div>
-                </div>,
-                rootRef.current ? (rootRef.current.ownerDocument.body) : document.body
+                </div>, rootRef.current ? (rootRef.current.ownerDocument.body) : document.body
             )}
-
-            {/* History Popover Portal (Now with Selection Logic) */}
             {historyState && createPortal(
-                <div 
-                    ref={historyRef}
-                    className="fixed z-[100] bg-white rounded-lg shadow-xl border border-slate-200 w-80 overflow-hidden animate-in fade-in zoom-in-95 duration-100 flex flex-col max-h-[300px]"
-                    style={{ left: historyState.x, top: historyState.y }}
-                >
+                <div ref={historyRef} className="fixed z-[100] bg-white rounded-lg shadow-xl border border-slate-200 w-80 overflow-hidden animate-in fade-in zoom-in-95 duration-100 flex flex-col max-h-[300px]" style={{ left: historyState.x, top: historyState.y }}>
                     <div className="bg-slate-100 px-3 py-2 border-b border-gray-200 flex items-center justify-between shrink-0">
-                        <div className="flex flex-col">
-                           <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                                <History size={12} className="text-blue-500"/> 
-                                {historyState.mode === 'dev' ? '選擇原開發者' : '選擇原銷售者(轉出)'}
-                           </span>
-                           <span className="text-[10px] text-gray-400 font-mono">{historyState.targetItemId}</span>
-                        </div>
-                        <button onClick={() => handlePersonSelect(historyState.mode === 'dev' ? '無' : '')} className="text-[10px] px-2 py-1 bg-white border border-gray-300 text-gray-500 hover:text-red-600 hover:border-red-300 rounded transition-colors flex items-center gap-1">
-                            <XCircle size={10}/> 
-                            {historyState.mode === 'dev' ? '設為無' : '取消轉出'}
-                        </button>
+                        <div className="flex flex-col"><span className="text-xs font-bold text-slate-700 flex items-center gap-1"><History size={12} className="text-blue-500"/> {historyState.mode === 'dev' ? '選擇原開發者' : '選擇原銷售者(轉出)'}</span><span className="text-[10px] text-gray-400 font-mono">{historyState.targetItemId}</span></div>
+                        <button onClick={() => handlePersonSelect(historyState.mode === 'dev' ? '無' : '')} className="text-[10px] px-2 py-1 bg-white border border-gray-300 text-gray-500 hover:text-red-600 hover:border-red-300 rounded transition-colors flex items-center gap-1"><XCircle size={10}/> {historyState.mode === 'dev' ? '設為無' : '取消轉出'}</button>
                     </div>
-                    
                     <div className="overflow-y-auto flex-1 p-0 bg-white">
-                        {historyState.loading ? (
-                            <div className="p-4 flex justify-center text-blue-500"><Loader2 className="animate-spin" size={20}/></div>
-                        ) : historyState.records.length === 0 ? (
-                            <div className="p-4 text-center">
-                                <div className="text-xs text-gray-400 mb-2">查無購買紀錄</div>
-                                <div className="text-[10px] text-gray-300">請確認是否已匯入歷史資料</div>
-                            </div>
-                        ) : (
+                        {historyState.loading ? <div className="p-4 flex justify-center text-blue-500"><Loader2 className="animate-spin" size={20}/></div> : historyState.records.length === 0 ? <div className="p-4 text-center"><div className="text-xs text-gray-400 mb-2">查無購買紀錄</div><div className="text-[10px] text-gray-300">請確認是否已匯入歷史資料</div></div> : (
                             <div className="divide-y divide-gray-100">
                                 {historyState.records.map((rec, idx) => {
-                                    // Check if staff is active
                                     const isActive = rec.salesPerson && allActiveStaff.includes(rec.salesPerson);
-                                    
                                     return (
                                         <div key={idx} className="px-3 py-2 hover:bg-blue-50/50 flex items-center justify-between text-xs font-mono group">
-                                            {/* Date + Alias + Qty + Store */}
-                                            <div className="flex items-center text-slate-600">
-                                                <span className="text-red-600 font-bold">{rec.date}</span>
-                                                {rec.displayAlias && (
-                                                    <span className="ml-1 text-[10px] text-blue-600 font-bold bg-blue-50 px-1 rounded border border-blue-100">
-                                                        {rec.displayAlias}
-                                                    </span>
-                                                )}
-                                                <span className="w-2 inline-block"></span>
-                                                <span className="font-bold text-slate-800 w-6 text-center">{rec.quantity || '-'}</span>
-                                                <span className="w-2 inline-block"></span>
-                                                
-                                                {/* Color-coded Store Name */}
-                                                <span className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${getStoreColorClass(rec.storeName || '')}`}>
-                                                    {(rec.storeName || '未知').substring(0, 2)}
-                                                </span>
-
-                                                {/* Price Display - Changed to Black */}
-                                                <span className="text-[10px] text-black font-mono ml-1">
-                                                    (${rec.price || 0})
-                                                </span>
-                                            </div>
-
-                                            {/* Sales Person Selection Button */}
-                                            <button 
-                                                onClick={() => rec.salesPerson && handlePersonSelect(rec.salesPerson)}
-                                                disabled={!rec.salesPerson}
-                                                className={`
-                                                    text-[10px] px-2 py-0.5 rounded border whitespace-nowrap transition-all flex items-center gap-1
-                                                    ${!rec.salesPerson ? 'bg-gray-50 text-gray-300 border-transparent cursor-default' : 
-                                                      isActive 
-                                                        ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 hover:border-purple-300 hover:shadow-sm cursor-pointer' 
-                                                        : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200 hover:text-gray-600 cursor-pointer'}
-                                                `}
-                                                title={isActive ? "點擊選取" : "已離職或非現職人員"}
-                                            >
-                                                {rec.salesPerson || '無'}
-                                                {rec.salesPerson && <UserPlus size={8} className="opacity-0 group-hover:opacity-100 transition-opacity"/>}
-                                            </button>
+                                            <div className="flex items-center text-slate-600"><span className="text-red-600 font-bold">{rec.date}</span>{rec.displayAlias && <span className="ml-1 text-[10px] text-blue-600 font-bold bg-blue-50 px-1 rounded border border-blue-100">{rec.displayAlias}</span>}<span className="w-2 inline-block"></span><span className="font-bold text-slate-800 w-6 text-center">{rec.quantity || '-'}</span><span className="w-2 inline-block"></span><span className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${getStoreColorClass(rec.storeName || '')}`}>{(rec.storeName || '未知').substring(0, 2)}</span><span className="text-[10px] text-black font-mono ml-1">(${rec.price || 0})</span></div>
+                                            <button onClick={() => rec.salesPerson && handlePersonSelect(rec.salesPerson)} disabled={!rec.salesPerson} className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap transition-all flex items-center gap-1 ${!rec.salesPerson ? 'bg-gray-50 text-gray-300 border-transparent cursor-default' : isActive ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 hover:border-purple-300 hover:shadow-sm cursor-pointer' : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200 hover:text-gray-600 cursor-pointer'}`} title={isActive ? "點擊選取" : "已離職或非現職人員"}>{rec.salesPerson || '無'}{rec.salesPerson && <UserPlus size={8} className="opacity-0 group-hover:opacity-100 transition-opacity"/>}</button>
                                         </div>
                                     );
                                 })}
                             </div>
                         )}
                     </div>
-                    {/* Fallback Manual Selection Hint */}
-                     <div className="p-1 bg-gray-50 text-[9px] text-gray-400 text-center border-t border-gray-100">
-                        點擊名字即可帶入
-                     </div>
-                </div>,
-                rootRef.current ? (rootRef.current.ownerDocument.body) : document.body
+                     <div className="p-1 bg-gray-50 text-[9px] text-gray-400 text-center border-t border-gray-100">點擊名字即可帶入</div>
+                </div>, rootRef.current ? (rootRef.current.ownerDocument.body) : document.body
             )}
           </>
+        )}
+
+        {/* === REPURCHASE SUMMARY === */}
+        {activeTab === 'repurchase' && (
+           <div className="flex flex-col h-full bg-slate-50">
+             {Object.keys(repurchaseMatrix.dataBySeller).length === 0 ? (
+               <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                  <RefreshCcw size={48} className="mb-4 opacity-30"/>
+                  <p className="font-bold">尚無任何回購/退貨資料</p>
+                  <p className="text-xs mt-2">請在點數表中設定「回購」狀態或指定「原開發者」</p>
+               </div>
+             ) : (
+               <div className="flex-1 overflow-auto p-4">
+                  <table className="w-full text-sm text-left whitespace-nowrap border-collapse border border-slate-300 bg-white shadow-sm">
+                     {/* Global Header */}
+                     <thead className="bg-slate-100 sticky top-0 z-20 shadow-sm text-slate-700">
+                        <tr>
+                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-24">分類</th>
+                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-20">日期</th>
+                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-24">客戶編號</th>
+                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-24">品項編號</th>
+                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-48">品名</th>
+                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-32">備註</th>
+                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-16 text-right font-bold text-amber-700 bg-amber-50">回購<br/>點數</th>
+                            {/* Dynamic Developer Header */}
+                            {repurchaseMatrix.developers.length > 0 && (
+                                <th colSpan={repurchaseMatrix.developers.length} className="px-2 py-1 border border-slate-300 bg-slate-200 text-center font-bold">
+                                    原開發者 (開發點數)
+                                </th>
+                            )}
+                        </tr>
+                        <tr>
+                             {repurchaseMatrix.developers.map(dev => (
+                                 <th key={dev} className="px-2 py-1 border border-slate-300 bg-slate-100 text-center text-xs font-mono min-w-[50px]">
+                                     {dev}
+                                 </th>
+                             ))}
+                        </tr>
+                     </thead>
+                     
+                     <tbody>
+                        {Object.keys(repurchaseMatrix.dataBySeller).sort().map(sellerName => {
+                             const rows = repurchaseMatrix.dataBySeller[sellerName];
+                             return (
+                                 <React.Fragment key={sellerName}>
+                                     {/* Section Header */}
+                                     <tr className="bg-slate-200/80 font-bold border-b border-slate-300">
+                                         <td colSpan={7 + repurchaseMatrix.developers.length} className="px-3 py-1.5 text-slate-800 flex items-center gap-2">
+                                             <div className={`w-2 h-2 rounded-full ${getStoreColorClass(sellerName).split(' ')[0]}`}></div>
+                                             {sellerName}
+                                         </td>
+                                     </tr>
+                                     {/* Data Rows */}
+                                     {rows.map(row => {
+                                         const isReturn = row.status === Stage1Status.RETURN;
+                                         return (
+                                             <tr key={row.id} className="hover:bg-blue-50 border-b border-slate-200 last:border-0">
+                                                 <td className="px-2 py-1 border-r border-slate-200">{row.category}</td>
+                                                 <td className="px-2 py-1 border-r border-slate-200 font-mono">{row.date}</td>
+                                                 <td className="px-2 py-1 border-r border-slate-200 font-mono">{formatCID(row.customerID)}</td>
+                                                 <td className="px-2 py-1 border-r border-slate-200 font-mono text-xs">{row.itemID}</td>
+                                                 <td className="px-2 py-1 border-r border-slate-200 truncate max-w-[200px]" title={row.itemName}>{row.itemName}</td>
+                                                 <td className="px-2 py-1 border-r border-slate-200 text-xs text-gray-500">{row.repurchaseType || ''}</td>
+                                                 
+                                                 {/* Seller Points (Repurchase Points) */}
+                                                 <td className={`px-2 py-1 border-r border-slate-200 text-right font-mono font-bold bg-amber-50 ${isReturn ? 'text-red-600' : 'text-slate-800'}`}>
+                                                     {row.actualSellerPoints}
+                                                 </td>
+
+                                                 {/* Developer Points Matrix */}
+                                                 {repurchaseMatrix.developers.map(dev => {
+                                                     const isTargetDev = dev === row.originalDeveloper;
+                                                     return (
+                                                         <td key={dev} className={`px-2 py-1 border-r border-slate-200 text-right font-mono ${isTargetDev ? 'bg-purple-50 font-bold' : ''}`}>
+                                                             {isTargetDev ? (
+                                                                 <span className={isReturn ? 'text-red-600' : 'text-purple-700'}>
+                                                                     {row.devPoints}
+                                                                 </span>
+                                                             ) : ''}
+                                                         </td>
+                                                     );
+                                                 })}
+                                             </tr>
+                                         );
+                                     })}
+                                     {/* Section Summary (Optional) */}
+                                     <tr className="bg-gray-50 border-t-2 border-slate-300 border-b-2">
+                                         <td colSpan={6} className="px-2 py-1 text-right text-xs font-bold text-gray-500">
+                                             {sellerName} 小計:
+                                         </td>
+                                         <td className="px-2 py-1 text-right font-mono font-bold text-amber-700 bg-amber-50">
+                                             {rows.reduce((sum, r) => sum + r.actualSellerPoints, 0)}
+                                         </td>
+                                         {repurchaseMatrix.developers.map(dev => (
+                                              <td key={dev} className="px-2 py-1 text-right font-mono font-bold text-purple-700 bg-purple-50">
+                                                  {rows.reduce((sum, r) => r.originalDeveloper === dev ? sum + r.devPoints : sum, 0)}
+                                              </td>
+                                         ))}
+                                     </tr>
+                                 </React.Fragment>
+                             );
+                        })}
+                     </tbody>
+                  </table>
+               </div>
+             )}
+           </div>
         )}
 
         {/* ... (Stage 2 and 3 code remains identical) ... */}
