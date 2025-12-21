@@ -9,6 +9,12 @@ interface ExportSettingsModalProps {
 
 const DEFAULT_MAPPING: TemplateMapping = {
   startRow: 2,
+  
+  // New Staff Info Defaults
+  storeName: '',
+  staffID: '',
+  staffName: '',
+
   // Stage 1
   category: 'A',
   date: 'B',
@@ -295,6 +301,13 @@ const ExportSettingsModal: React.FC<ExportSettingsModalProps> = ({ onClose }) =>
                             </div>
                         ) : (
                             <>
+                            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-2 mb-1 border-b pb-1">人員資訊 (填入每一列)</div>
+                            <div className="space-y-1">
+                                {renderColInput('店名 (分店)', 'storeName', '例如 A')}
+                                {renderColInput('編號 (ID)', 'staffID', '例如 B')}
+                                {renderColInput('姓名', 'staffName', '例如 C')}
+                            </div>
+
                             <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-2 mb-1 border-b pb-1">第一階段：點數表</div>
                             <div className="space-y-1">
                                 {renderColInput('分類', 'category', 'A')}

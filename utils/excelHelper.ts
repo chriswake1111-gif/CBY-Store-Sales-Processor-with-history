@@ -120,10 +120,12 @@ export const exportToExcel = async (
     if (config) {
         // TEMPLATE MODE
         
+        // Lookup staff info early for both Stats and List Rows
+        const staffInfo = staffMasterList.find(s => s.name === person);
+
         // 1. STATS FILLING (Only for Sales / Template Mode)
         // Check if we have specific cell mappings and process them first (Fixed Layout)
         if (data.role !== 'PHARMACIST') {
-            const staffInfo = staffMasterList.find(s => s.name === person);
             
             // Calculate Stats
             // A. Points
@@ -249,6 +251,11 @@ export const exportToExcel = async (
             const note = data.role === 'PHARMACIST' ? (row.category === '調劑點數' ? '' : row.status) : row.status;
             const pts = (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') ? '' : row.calculatedPoints;
 
+            // Write Global Staff Info (Repeated per row)
+            put(config.storeName, safeVal(staffInfo?.branch));
+            put(config.staffID, safeVal(staffInfo?.id));
+            put(config.staffName, person);
+
             put(config.category, safeVal(row.category));
             put(config.date, safeVal(row.date));
             put(config.customerID, formatCID(row.customerID)); // Use formatCID
@@ -282,6 +289,11 @@ export const exportToExcel = async (
                  if (r.isDeleted) return;
                  let reward = r.format === '禮券' ? `${r.quantity}張` : `${r.customReward ?? (r.quantity * r.reward)}元`;
                  
+                 // Write Global Staff Info (Repeated per row) for Stage 2 as well
+                 put(config.storeName, safeVal(staffInfo?.branch));
+                 put(config.staffID, safeVal(staffInfo?.id));
+                 put(config.staffName, person);
+
                  // Use Specific Reward Mapping
                  // Default Fallbacks: Map to similar columns as Stage 1 if config is missing (for safety)
                  put(config.reward_category || config.category, r.category);

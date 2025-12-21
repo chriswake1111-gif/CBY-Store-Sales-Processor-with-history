@@ -16,6 +16,12 @@ export interface HistoryRecord {
 
 export interface TemplateMapping {
   startRow: number;
+  
+  // New: Staff Info Columns (Repeated per row)
+  storeName?: string;
+  staffID?: string;
+  staffName?: string;
+
   // Stage 1: List Columns
   category: string;
   date: string;
