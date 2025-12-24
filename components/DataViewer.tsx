@@ -587,7 +587,16 @@ const DataViewer: React.FC<DataViewerProps> = ({
                                     const isActive = rec.salesPerson && allActiveStaff.includes(rec.salesPerson);
                                     return (
                                         <div key={idx} className="px-3 py-2 hover:bg-blue-50/50 flex items-center justify-between text-xs font-mono group">
-                                            <div className="flex items-center text-slate-600"><span className="text-red-600 font-bold">{rec.date}</span>{rec.displayAlias && <span className="ml-1 text-[10px] text-blue-600 font-bold bg-blue-50 px-1 rounded border border-blue-100">{rec.displayAlias}</span>}<span className="w-2 inline-block"></span><span className="font-bold text-slate-800 w-6 text-center">{rec.quantity || '-'}</span><span className="w-2 inline-block"></span><span className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${getStoreColorClass(rec.storeName || '')}`}>{(rec.storeName || '未知').substring(0, 2)}</span><span className="text-[10px] text-black font-mono ml-1">(${rec.price || 0})</span></div>
+                                            <div className="flex items-center text-slate-600">
+                                                <span className="text-red-600 font-bold">{rec.date}</span>
+                                                {rec.displayAlias && <span className="ml-1 text-[10px] text-blue-600 font-bold bg-blue-50 px-1 rounded border border-blue-100">{rec.displayAlias}</span>}
+                                                <span className="w-2 inline-block"></span>
+                                                <span className="font-bold text-slate-800 text-center">{rec.quantity || '-'}</span>
+                                                {rec.unit && <span className="text-[10px] text-gray-400 ml-0.5">{rec.unit}</span>}
+                                                <span className="w-2 inline-block"></span>
+                                                <span className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${getStoreColorClass(rec.storeName || '')}`}>{(rec.storeName || '未知').substring(0, 2)}</span>
+                                                <span className="text-[10px] text-black font-mono ml-1">(${rec.price || 0})</span>
+                                            </div>
                                             <button onClick={() => rec.salesPerson && handlePersonSelect(rec.salesPerson)} disabled={!rec.salesPerson} className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap transition-all flex items-center gap-1 ${!rec.salesPerson ? 'bg-gray-50 text-gray-300 border-transparent cursor-default' : isActive ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 hover:border-purple-300 hover:shadow-sm cursor-pointer' : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200 hover:text-gray-600 cursor-pointer'}`} title={isActive ? "點擊選取" : "已離職或非現職人員"}>{rec.salesPerson || '無'}{rec.salesPerson && <UserPlus size={8} className="opacity-0 group-hover:opacity-100 transition-opacity"/>}</button>
                                         </div>
                                     );

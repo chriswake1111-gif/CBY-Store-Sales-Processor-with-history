@@ -203,6 +203,8 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
           const qty = Number(row[COL_HEADERS.QUANTITY]) || 0;
           // Parse Unit Price (New)
           const price = Number(row[COL_HEADERS.UNIT_PRICE] || row['單價'] || 0);
+          // Parse Unit
+          const unit = String(row[COL_HEADERS.UNIT] || row['單位'] || '').trim();
           
           // Fix: Use Sales Date if available, otherwise fallback to Ticket No ('單號')
           const dateStr = String(row[COL_HEADERS.SALES_DATE] || row[COL_HEADERS.TICKET_NO] || '').trim();
@@ -215,7 +217,8 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
             itemID: itemID,
             date: dateStr,
             quantity: qty,
-            price: price, // Add Price
+            price: price, 
+            unit: unit, // Add Unit
             storeName: storeName,
             salesPerson: salesPerson
           });
