@@ -450,7 +450,6 @@ export const exportToExcel = async (
   }
 
   // --- 2. REPURCHASE SHEET (MATRIX VIEW) ---
-  // ... (Repurchase sheet logic remains unchanged) ...
   // Step 1: Gather Matrix Data
   interface RepurchaseRowData extends Stage1Row {
       actualSellerPoints: number;
@@ -522,23 +521,40 @@ export const exportToExcel = async (
       sortedDevs.forEach(() => cols.push({ width: 12 }));
       repSheet.columns = cols;
 
+      // --- TITLE ROW (NEW) ---
+      // If reportDate exists, insert it at row 1 and push headers down.
+      if (reportDate) {
+          const titleRow = repSheet.addRow([reportDate]);
+          const lastColIdx = 7 + sortedDevs.length; // A-G + Devs
+          // Merge from A1 to the last column
+          repSheet.mergeCells(titleRow.number, 1, titleRow.number, lastColIdx);
+          
+          const cell = titleRow.getCell(1);
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          cell.font = { bold: true, size: 14 };
+          // Fill background for Title (Optional, matching image style loosely)
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFBE7C6' } }; // Light Orange/Gold
+          cell.border = { top: {style:'thin'}, bottom: {style:'thin'}, left: {style:'thin'}, right: {style:'thin'} };
+          
+          titleRow.height = 30; 
+      }
+
       // --- HEADER ROWS ---
-      // Row 1: Fixed Headers + "Original Developer" Merged Header
+      // Fixed Headers + "Original Developer" Merged Header
       const headerRow1 = repSheet.addRow([
           "分類", "日期", "客戶編號", "品項編號", "品名", "備註", "回購點數", "原開發者 (開發點數)"
       ]);
+      
       // Merge "Original Developer" across all dev columns
       if (sortedDevs.length > 0) {
-          // H1 is index 8 (1-based). 
-          // 1=A, 7=G, 8=H.
-          const startCol = 8;
+          const startCol = 8; // Column H
           const endCol = 8 + sortedDevs.length - 1;
           if (endCol >= startCol) {
-              repSheet.mergeCells(1, startCol, 1, endCol);
+              repSheet.mergeCells(headerRow1.number, startCol, headerRow1.number, endCol);
           }
       }
 
-      // Row 2: Dev Names
+      // Dev Names Sub-header
       const headerRow2Values = ["", "", "", "", "", "", ""]; // Spacers for A-G
       sortedDevs.forEach(dev => headerRow2Values.push(dev));
       const headerRow2 = repSheet.addRow(headerRow2Values);
@@ -551,12 +567,13 @@ export const exportToExcel = async (
               if (colNum <= 7) {
                   cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } }; // Slate-200
               } else {
+                  // Dev header background
                   cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDD6FE' } }; // Purple-100
               }
               cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
           });
       });
-      // Specific style for "Repurchase Points" header (Col 7)
+      // Specific style for "Repurchase Points" header (Col 7) in the main header row
       headerRow1.getCell(7).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } }; // Amber-50
       headerRow1.getCell(7).font = { bold: true, color: { argb: 'FFB45309' } }; // Amber-700
       
