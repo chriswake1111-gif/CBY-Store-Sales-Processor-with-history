@@ -39,7 +39,12 @@ const DEFAULT_MAPPING: TemplateMapping = {
   // Repurchase Defaults
   repurchasePoints: 'G',
   originalDeveloper: 'H',
-  devPoints: 'I'
+  devPoints: 'I',
+
+  // Pharmacist fixed defaults
+  cell_pharm_qty_1727: '',
+  cell_pharm_qty_1345: '',
+  cell_pharm_bonus: ''
 };
 
 const ExportSettingsModal: React.FC<ExportSettingsModalProps> = ({ onClose }) => {
@@ -298,8 +303,6 @@ const ExportSettingsModal: React.FC<ExportSettingsModalProps> = ({ onClose }) =>
                             </div>
                         ) : (
                             <>
-                            {/* Staff Info removed from here and moved to Stats/Fixed Cells tab */}
-
                             <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-2 mb-1 border-b pb-1">第一階段：點數表</div>
                             <div className="space-y-1">
                                 {renderColInput('分類', 'category', 'A')}
@@ -313,17 +316,21 @@ const ExportSettingsModal: React.FC<ExportSettingsModalProps> = ({ onClose }) =>
                                 {renderColInput(activeTypeId === TEMPLATE_IDS.PHARMACIST ? '藥師點數' : '計算點數', 'points', 'I')}
                             </div>
 
-                            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-6 mb-1 border-b pb-1">第二階段：現金獎勵/調劑</div>
-                            <div className="space-y-1">
-                                {renderColInput('分類', 'reward_category', 'A')}
-                                {renderColInput('日期', 'reward_date', 'B')}
-                                {renderColInput('客戶編號', 'reward_customerID', 'C')}
-                                {renderColInput('品項編號', 'reward_itemID', 'D')}
-                                {renderColInput('品名', 'reward_itemName', 'E')}
-                                {renderColInput('數量', 'reward_quantity', 'F')}
-                                {renderColInput('備註', 'reward_note', 'G')}
-                                {renderColInput('獎勵/金額', 'reward_amount', 'H')}
-                            </div>
+                            {activeTypeId !== TEMPLATE_IDS.PHARMACIST && (
+                                <>
+                                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-6 mb-1 border-b pb-1">第二階段：現金獎勵/調劑</div>
+                                    <div className="space-y-1">
+                                        {renderColInput('分類', 'reward_category', 'A')}
+                                        {renderColInput('日期', 'reward_date', 'B')}
+                                        {renderColInput('客戶編號', 'reward_customerID', 'C')}
+                                        {renderColInput('品項編號', 'reward_itemID', 'D')}
+                                        {renderColInput('品名', 'reward_itemName', 'E')}
+                                        {renderColInput('數量', 'reward_quantity', 'F')}
+                                        {renderColInput('備註', 'reward_note', 'G')}
+                                        {renderColInput('獎勵/金額', 'reward_amount', 'H')}
+                                    </div>
+                                </>
+                            )}
                             </>
                         )}
 
@@ -383,6 +390,16 @@ const ExportSettingsModal: React.FC<ExportSettingsModalProps> = ({ onClose }) =>
                                     {renderCellInput('7-11 禮卷張數', 'cell_reward711')}
                                     {renderCellInput('全家 禮卷張數', 'cell_rewardFamily')}
                                     {renderCellInput('全聯 禮卷張數', 'cell_rewardPx')}
+                                </>
+                            )}
+
+                            {/* Pharmacist Stats */}
+                            {activeTypeId === TEMPLATE_IDS.PHARMACIST && (
+                                <>
+                                    <div className="col-span-2 text-xs font-bold text-slate-400 uppercase tracking-wider mt-4 mb-1 border-b pb-1">調劑件數與獎金</div>
+                                    {renderCellInput('自費調劑 (001727) 數量', 'cell_pharm_qty_1727', '例如 F4')}
+                                    {renderCellInput('調劑藥事服務費 (001345) 數量', 'cell_pharm_qty_1345', '例如 F6')}
+                                    {renderCellInput('調劑獎金總額', 'cell_pharm_bonus', '例如 H4')}
                                 </>
                             )}
                         </div>

@@ -74,6 +74,11 @@ export interface TemplateMapping {
   cell_reward711?: string;       // 7-11 禮卷
   cell_rewardFamily?: string;    // 全家 禮卷
   cell_rewardPx?: string;        // 全聯 禮卷
+
+  // Pharmacist Fixed Cells
+  cell_pharm_qty_1727?: string;  // 自費調劑 (001727) 數量
+  cell_pharm_qty_1345?: string;  // 調劑藥事服務費 (001345) 數量
+  cell_pharm_bonus?: string;     // 調劑獎金
 }
 
 export interface TemplateRecord {

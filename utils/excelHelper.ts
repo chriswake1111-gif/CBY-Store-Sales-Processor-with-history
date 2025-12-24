@@ -272,7 +272,7 @@ export const exportToExcel = async (
             }
         };
 
-        // 1. Stage 1 Data
+        // 1. Stage 1 Data (List)
         finalStage1.forEach(row => {
             const note = data.role === 'PHARMACIST' ? (row.category === '調劑點數' ? '' : row.status) : row.status;
             let pts = 0;
@@ -295,38 +295,46 @@ export const exportToExcel = async (
             currentRow++;
         });
 
-        // Append Stage 2 below
-        currentRow += 2;
-        
-        const addSimpleRow = (vals: any[]) => {
-             const r = sheet.getRow(currentRow++);
-             r.values = vals;
-             r.commit();
-        };
+        // Stage 2 Logic
+        // For Pharmacist in Template Mode: Use Fixed Cells if configured
+        if (data.role === 'PHARMACIST') {
+            const qty1727 = data.stage2.find(r => r.itemID === '001727')?.quantity || 0;
+            const qty1345 = data.stage2.find(r => r.itemID === '001345')?.quantity || 0;
+            const bonus = Math.max(0, (qty1727 - 300) * 10);
 
-        if (data.stage2.length > 0) {
-             addSimpleRow(["--- 第二階段：獎勵/調劑 ---"]);
-             
-             data.stage2.forEach(r => {
-                 if (r.isDeleted) return;
-                 let reward = r.format === '禮券' ? `${r.quantity}張` : `${r.customReward ?? (r.quantity * r.reward)}元`;
+            writeToCell(config.cell_pharm_qty_1727, qty1727);
+            writeToCell(config.cell_pharm_qty_1345, qty1345);
+            writeToCell(config.cell_pharm_bonus, bonus);
+            
+            // DO NOT append list rows for Pharmacist in template mode
+        } else {
+            // For Sales (or other), append Stage 2 list below Stage 1
+            currentRow += 2;
+            
+            const addSimpleRow = (vals: any[]) => {
+                 const r = sheet.getRow(currentRow++);
+                 r.values = vals;
+                 r.commit();
+            };
+
+            if (data.stage2.length > 0) {
+                 addSimpleRow(["--- 第二階段：獎勵/調劑 ---"]);
                  
-                 put(config.reward_category || config.category, r.category);
-                 put(config.reward_date || config.date, r.displayDate);
-                 put(config.reward_customerID || config.customerID, formatCID(r.customerID));
-                 put(config.reward_itemID || config.itemID, r.itemID);
-                 put(config.reward_itemName || config.itemName, r.itemName);
-                 put(config.reward_quantity || config.quantity, r.quantity);
-                 put(config.reward_note || 'G', r.note); 
-                 put(config.reward_amount || 'H', reward); 
-                 currentRow++;
-             });
-             
-             if (data.role === 'PHARMACIST') {
-                const dispensingQty = data.stage2.find(r => r.itemID === '001727')?.quantity || 0;
-                const bonus = Math.max(0, (dispensingQty - 300) * 10);
-                addSimpleRow(["", "自費調劑獎金", "", `${bonus}元`]);
-             }
+                 data.stage2.forEach(r => {
+                     if (r.isDeleted) return;
+                     let reward = r.format === '禮券' ? `${r.quantity}張` : `${r.customReward ?? (r.quantity * r.reward)}元`;
+                     
+                     put(config.reward_category || config.category, r.category);
+                     put(config.reward_date || config.date, r.displayDate);
+                     put(config.reward_customerID || config.customerID, formatCID(r.customerID));
+                     put(config.reward_itemID || config.itemID, r.itemID);
+                     put(config.reward_itemName || config.itemName, r.itemName);
+                     put(config.reward_quantity || config.quantity, r.quantity);
+                     put(config.reward_note || 'G', r.note); 
+                     put(config.reward_amount || 'H', reward); 
+                     currentRow++;
+                 });
+            }
         }
     } else {
         // NO TEMPLATE MODE
@@ -423,6 +431,7 @@ export const exportToExcel = async (
   }
 
   // --- 2. REPURCHASE SHEET (MATRIX VIEW) ---
+  // ... (Repurchase sheet logic remains unchanged) ...
   // Step 1: Gather Matrix Data
   interface RepurchaseRowData extends Stage1Row {
       actualSellerPoints: number;
@@ -638,7 +647,7 @@ export const exportToExcel = async (
               });
           });
           
-          // Spacer Row (No bottom subtotal anymore)
+          // Spacer Row
           repSheet.addRow([]);
       });
   }
@@ -653,13 +662,12 @@ export const exportToExcel = async (
   window.URL.revokeObjectURL(url);
 };
 
-// Helper: Get ARGB color from string hash (Simple version matching Preview colors roughly)
+// Helper: Get ARGB color from string hash
 function getStoreColorARGB(name: string): string {
-    // Just return a standard dark grey for text in Excel, background logic is handled above
     return 'FF334155';
 }
 
-// Helper: Copy Sheet Structure (Columns, Merges, Styles)
+// Helper: Copy Sheet Structure
 function copySheetModel(source: ExcelJS.Worksheet, target: ExcelJS.Worksheet, maxRow: number = 20) {
     if (source.columns) {
         target.columns = source.columns.map(col => ({ 
@@ -667,28 +675,22 @@ function copySheetModel(source: ExcelJS.Worksheet, target: ExcelJS.Worksheet, ma
         }));
     }
     
-    // Copy Page Setup
     target.pageSetup = { ...source.pageSetup };
 
-    // Copy Worksheet Properties (e.g. default row height, fit to page)
     if (source.properties) {
         target.properties = JSON.parse(JSON.stringify(source.properties));
     }
     
-    // Copy Views (e.g. Frozen Rows/Cols)
     if (source.views) {
         target.views = JSON.parse(JSON.stringify(source.views));
     }
     
-    // Iterate ALL rows in source to preserve heights/hidden status
     source.eachRow({ includeEmpty: true }, (row, rowNumber) => {
         const newRow = target.getRow(rowNumber);
         
-        // Always copy row dimension properties
         if (row.height) newRow.height = row.height;
         newRow.hidden = row.hidden;
         
-        // Only copy cell content/styles if within the header range (before startRow)
         if (rowNumber < maxRow) {
              row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
                  const newCell = newRow.getCell(colNumber);
@@ -698,7 +700,6 @@ function copySheetModel(source: ExcelJS.Worksheet, target: ExcelJS.Worksheet, ma
         }
     });
 
-    // Copy Merges (Robust method)
     const model = (source as any).model;
     if (model && model.merges) {
         (model.merges as string[]).forEach(merge => {
