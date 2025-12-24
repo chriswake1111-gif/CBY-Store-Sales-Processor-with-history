@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { RawRow, ExclusionItem, RewardRule, ProcessedData, Stage1Status, StaffRole, Stage3Summary, RepurchaseOption, StaffRecord } from './types';
 import { readExcelFile, exportToExcel } from './utils/excelHelper';
-import { processStage1, processStage2, processStage3, recalculateStage1Points, generateEmptyStage3Rows } from './utils/processor';
+import { processStage1, processStage2, processStage3, recalculateStage1Points, generateEmptyStage3Rows, determineCategory, sortStage1 } from './utils/processor';
 import { saveToLocal, loadFromLocal, checkSavedData } from './utils/storage';
 import { seedDefaultStores } from './utils/db'; 
 import FileUploader from './components/FileUploader';
@@ -279,15 +279,34 @@ const App: React.FC = () => {
   
   const handleUpdateStage1Action2 = (id: string, field: 'originalDeveloper' | 'repurchaseType' | 'returnTarget', val: string) => {
       if (!activePerson) return;
-      setPersonData(activePerson, (data) => ({
-          ...data,
-          stage1: data.stage1.map(row => {
-             if (row.id !== id) return row;
-             const updated = { ...row, [field]: val };
-             updated.calculatedPoints = recalculateStage1Points(updated, data.role);
-             return updated;
-          })
-      }));
+      setPersonData(activePerson, (data) => {
+        const updatedStage1 = data.stage1.map(row => {
+           if (row.id !== id) return row;
+           const updated = { ...row, [field]: val };
+           
+           // Special Logic: Switching Category based on Return Target presence
+           if (field === 'returnTarget') {
+              if (val) {
+                  // If target is selected, force category to '退換貨' so it sorts to bottom
+                  updated.category = '退換貨';
+              } else {
+                  // If target is cleared, revert to natural category so it sorts back to its group
+                  updated.category = determineCategory(row.raw);
+              }
+           }
+           
+           updated.calculatedPoints = recalculateStage1Points(updated, data.role);
+           return updated;
+        });
+
+        // Re-sort the list immediately so rows jump to correct position
+        const reSorted = sortStage1(updatedStage1);
+        
+        return {
+           ...data,
+           stage1: reSorted
+        };
+      });
   };
 
   const handleToggleDeleteStage2 = (id: string) => {

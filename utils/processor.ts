@@ -9,6 +9,21 @@ const getVal = (row: RawRow, key: string): any => row[key];
 const getStr = (row: RawRow, key: string): string => String(row[key] || '').trim();
 const getNum = (row: RawRow, key: string): number => Number(row[key]) || 0;
 
+// --- Helper: Determine Category based on Raw Data ---
+export const determineCategory = (row: RawRow): string => {
+    const cat1 = getStr(row, COL_HEADERS.CAT_1);
+    const itemName = getVal(row, COL_HEADERS.ITEM_NAME) || getVal(row, '品名') || '';
+    
+    let category = CAT_MAPPING[cat1] || '其他';
+    if (cat1 === '05-3') {
+        const nameStr = String(itemName);
+        if (nameStr.includes('麥精') || nameStr.includes('米精')) {
+            category = '嬰幼兒米麥精';
+        }
+    }
+    return category;
+};
+
 // --- STAGE 1: Points Table (Dispatcher) ---
 // Now Async
 export const processStage1 = async (rawData: RawRow[], exclusionList: ExclusionItem[], role: StaffRole): Promise<Stage1Row[]> => {
@@ -68,7 +83,8 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
     const ticketNo = getStr(row, COL_HEADERS.TICKET_NO);
     const dateStr = ticketNo.length >= 7 ? ticketNo.substring(5, 7) : '??';
 
-    let category = '其他'; 
+    // Determine Base Category
+    let category = determineCategory(row);
     let calculatedPoints = 0;
     let status = Stage1Status.DEVELOP;
 
@@ -76,21 +92,20 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
     
     if (isReturn) {
         // --- RETURN LOGIC ---
-        category = '退換貨';
         status = Stage1Status.RETURN;
         
-        // Determine Division Logic for Returns (to match Sale logic)
-        // We need to know what the item category *would be* to divide points correctly
-        // Reuse mapping logic temporarily
-        let tempCat = CAT_MAPPING[cat1] || '其他';
-        if (cat1 === '05-3' && (String(itemName).includes('麥精') || String(itemName).includes('米精'))) {
-            tempCat = '嬰幼兒米麥精';
+        // IMPORTANT: Only override category to '退換貨' if a return target is ALREADY set (e.g. from history re-processing).
+        // Otherwise, keep the product category (e.g., '成人奶粉') so it sorts with similar items.
+        // We will handle the category switch in the UI when the user selects a target.
+        if (row.returnTarget) {
+            category = '退換貨';
         }
 
-        if (tempCat === '現金-小兒銷售') {
+        // Logic for Points Calculation
+        if (category === '現金-小兒銷售') {
             calculatedPoints = 0;
         } else {
-            const isDividedByQty = tempCat === '成人奶粉' || tempCat === '成人奶水' || tempCat === '嬰幼兒米麥精';
+            const isDividedByQty = category === '成人奶粉' || category === '成人奶水' || category === '嬰幼兒米麥精';
             if (isDividedByQty) {
                  const absPts = Math.abs(rawPoints);
                  const absQty = Math.abs(qty || 1);
@@ -104,14 +119,7 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
 
     } else {
         // --- SALES LOGIC ---
-        category = CAT_MAPPING[cat1] || '其他';
-        if (cat1 === '05-3') {
-          const nameStr = String(itemName);
-          if (nameStr.includes('麥精') || nameStr.includes('米精')) {
-            category = '嬰幼兒米麥精';
-          }
-        }
-
+        
         // Calculate Initial Points
         if (category === '現金-小兒銷售') {
             calculatedPoints = 0;
@@ -217,6 +225,7 @@ const processStage1Pharmacist = async (rawData: RawRow[], exclusionList: Exclusi
 
     if (!isMatch) continue;
 
+    // For Pharmacist, returns usually go to specific bucket or '退換貨'
     if (isReturn) category = '退換貨';
 
     // 3. Conditional CID Filter based on Category
@@ -278,7 +287,7 @@ const processStage1Pharmacist = async (rawData: RawRow[], exclusionList: Exclusi
   });
 };
 
-const sortStage1 = (rows: Stage1Row[]): Stage1Row[] => {
+export const sortStage1 = (rows: Stage1Row[]): Stage1Row[] => {
   return rows.sort((a, b) => {
     const orderA = STAGE1_SORT_ORDER[a.category] ?? 99;
     const orderB = STAGE1_SORT_ORDER[b.category] ?? 99;
@@ -307,11 +316,17 @@ export const recalculateStage1Points = (row: Stage1Row, role: StaffRole = 'SALES
       const isNegative = base < 0; // Should be true for returns
       
       // Calculate Base Value for Single Unit logic (same as normal)
+      // Note: We use row.category which might be '退換貨'.
+      // If it is '退換貨', we can't easily know if it was '成人奶粉' for division logic without re-checking raw data.
+      // BUT, 'processStage1' handles the division and stores it in 'calculatedPoints' initially.
+      // 'recalculateStage1Points' is called on updates. 
+      // We should check natural category to decide division logic.
+      const naturalCategory = determineCategory(row.raw);
+
       let calculatedBase = base;
-      const isDividedByQty = row.category !== '退換貨' && (
-          (role === 'PHARMACIST' && row.category === '成人奶粉') ||
-          (role === 'SALES' && (row.category === '成人奶粉' || row.category === '成人奶水' || row.category === '嬰幼兒米麥精'))
-      );
+      const isDividedByQty = 
+          (role === 'PHARMACIST' && naturalCategory === '成人奶粉') ||
+          (role === 'SALES' && (naturalCategory === '成人奶粉' || naturalCategory === '成人奶水' || naturalCategory === '嬰幼兒米麥精'));
 
       if (isDividedByQty) {
            const absBase = Math.abs(base);
@@ -319,25 +334,10 @@ export const recalculateStage1Points = (row: Stage1Row, role: StaffRole = 'SALES
            calculatedBase = isNegative ? -Math.floor(absBase / absQty) : Math.floor(absBase / absQty);
       }
       
-      // If it's a return row processed by default logic above, 'calculatedPoints' might already be set.
-      // But here we enforce the split logic.
-      
       if (!hasDev) {
           return calculatedBase; // Full deduction
       } else {
           // Shared deduction
-          // Logic: Dev gets "more" deduction if odd.
-          // e.g. -3. Dev: -2, Seller: -1.
-          // This function returns the value for the *current row context*. 
-          // If this row is in the "Repurchase Table" context (Dev), it returns full.
-          // If this row is in "Sales Table" context (Seller), it returns the 50% share.
-          
-          // Actually, this function is usually called to determine what to display in the main list (Seller's list).
-          // In Seller's list, we show the Seller's share.
-          
-          // Seller Share = Math.ceil(calculatedBase / 2) ? 
-          // -3 / 2 = -1.5. ceil is -1. floor is -2.
-          // Seller should get -1. So Math.ceil works for negative numbers to get the "smaller" magnitude.
           return Math.ceil(calculatedBase / 2);
       }
   }
