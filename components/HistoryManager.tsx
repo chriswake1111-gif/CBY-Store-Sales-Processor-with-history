@@ -179,7 +179,7 @@ const HistoryManager: React.FC<HistoryManagerProps> = ({ onClose }) => {
     setIsProcessing(true);
     setProgress(0);
     setMessageType('info');
-    setMessage(`正在讀取檔案並匯入至「${targetStore}」...`);
+    setMessage(`正在匯入「${file.name}」至「${targetStore}」...`);
 
     try {
       const json = await readExcelFile(file);
