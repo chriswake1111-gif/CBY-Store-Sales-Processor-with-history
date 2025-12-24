@@ -15,6 +15,7 @@ export interface AppState {
   repurchaseOptions: RepurchaseOption[];
   staffMasterList: StaffRecord[];
   
+  reportDate?: string; // Added field for extracted Year/Month string
   timestamp: number;
 }
 

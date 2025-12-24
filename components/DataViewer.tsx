@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { ProcessedData, Stage1Status, RepurchaseOption, StaffRecord, Stage1Row } from '../types';
-import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp, Undo2, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown, RefreshCcw } from 'lucide-react';
+import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp, Undo2, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown, RefreshCcw, Calendar } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { getItemHistory, HistoryRecord } from '../utils/db'; 
 import { recalculateStage1Points } from '../utils/processor'; 
@@ -24,6 +24,7 @@ interface DataViewerProps {
   allActiveStaff: string[];
   staffRecord?: StaffRecord;
   fullProcessedData?: ProcessedData; 
+  reportDate?: string; // New Prop for Date Display
   
   onClose?: () => void;
 }
@@ -35,7 +36,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
   sortedPeople, selectedPersons, togglePersonSelection, activePerson, setActivePerson,
   currentData, activeTab, setActiveTab, stage1TotalPoints,
   handleStatusChangeStage1, handleToggleDeleteStage2, handleUpdateStage2CustomReward,
-  handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord, fullProcessedData,
+  handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord, fullProcessedData, reportDate,
   onClose
 }) => {
   
@@ -410,23 +411,27 @@ const DataViewer: React.FC<DataViewerProps> = ({
                     </div>
                 </div>
                 
-                {/* Targets Badge */}
-                {(staffRecord?.pointsStandard || staffRecord?.cosmeticStandard) && (
-                    <div className="ml-6 flex items-center gap-3">
-                         {staffRecord.pointsStandard !== undefined && (
-                             <div className="bg-white px-2.5 py-1 rounded border border-gray-200 shadow-sm flex flex-col items-center">
-                                 <div className="text-[8px] text-gray-400 font-black uppercase flex items-center gap-1"><TrendingUp size={8}/> Points Target</div>
-                                 <div className="text-xs font-mono font-black text-blue-700">{staffRecord.pointsStandard.toLocaleString()}</div>
-                             </div>
-                         )}
-                         {staffRecord.cosmeticStandard !== undefined && (
-                             <div className="bg-white px-2.5 py-1 rounded border border-gray-200 shadow-sm flex flex-col items-center">
-                                 <div className="text-[8px] text-gray-400 font-black uppercase flex items-center gap-1"><Package size={8}/> Cosmetic Target</div>
-                                 <div className="text-xs font-mono font-black text-emerald-700">${staffRecord.cosmeticStandard.toLocaleString()}</div>
-                             </div>
-                         )}
-                    </div>
-                )}
+                {/* Targets & Date Badge */}
+                <div className="ml-6 flex items-center gap-3">
+                     {staffRecord?.pointsStandard !== undefined && (
+                         <div className="bg-white px-2.5 py-1 rounded border border-gray-200 shadow-sm flex flex-col items-center">
+                             <div className="text-[8px] text-gray-400 font-black uppercase flex items-center gap-1"><TrendingUp size={8}/> Points Target</div>
+                             <div className="text-xs font-mono font-black text-blue-700">{staffRecord.pointsStandard.toLocaleString()}</div>
+                         </div>
+                     )}
+                     {staffRecord?.cosmeticStandard !== undefined && (
+                         <div className="bg-white px-2.5 py-1 rounded border border-gray-200 shadow-sm flex flex-col items-center">
+                             <div className="text-[8px] text-gray-400 font-black uppercase flex items-center gap-1"><Package size={8}/> Cosmetic Target</div>
+                             <div className="text-xs font-mono font-black text-emerald-700">${staffRecord.cosmeticStandard.toLocaleString()}</div>
+                         </div>
+                     )}
+                     {reportDate && (
+                         <div className="bg-white px-3 py-1 rounded border border-red-200 shadow-sm flex flex-col items-center justify-center">
+                             <div className="text-[8px] text-gray-400 font-black uppercase flex items-center gap-1"><Calendar size={8}/> Period</div>
+                             <div className="text-sm font-mono font-black text-slate-800">{reportDate}</div>
+                         </div>
+                     )}
+                </div>
             </div>
 
             <div className="flex items-end gap-1">
@@ -594,125 +599,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
                 </div>, rootRef.current ? (rootRef.current.ownerDocument.body) : document.body
             )}
           </>
-        )}
-
-        {/* === REPURCHASE SUMMARY === */}
-        {activeTab === 'repurchase' && (
-           <div className="flex flex-col h-full bg-slate-50">
-             {Object.keys(repurchaseMatrix.dataBySeller).length === 0 ? (
-               <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                  <RefreshCcw size={48} className="mb-4 opacity-30"/>
-                  <p className="font-bold">尚無任何回購/退貨資料</p>
-                  <p className="text-xs mt-2">請在點數表中設定「回購」狀態或指定「原開發者」</p>
-               </div>
-             ) : (
-               <div className="flex-1 overflow-auto p-4">
-                  <table className="w-full text-sm text-left whitespace-nowrap border-collapse border border-slate-300 bg-white shadow-sm">
-                     {/* Global Header */}
-                     <thead className="bg-slate-100 sticky top-0 z-20 shadow-sm text-slate-700">
-                        <tr>
-                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-24">分類</th>
-                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-20">日期</th>
-                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-24">客戶編號</th>
-                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-24">品項編號</th>
-                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-48">品名</th>
-                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-32">備註</th>
-                            <th rowSpan={2} className="px-2 py-2 border border-slate-300 bg-slate-100 w-16 text-right font-bold text-amber-700 bg-amber-50">回購<br/>點數</th>
-                            {/* Dynamic Developer Header */}
-                            {repurchaseMatrix.developers.length > 0 && (
-                                <th colSpan={repurchaseMatrix.developers.length} className="px-2 py-1 border border-slate-300 bg-slate-200 text-center font-bold">
-                                    原開發者 (開發點數)
-                                </th>
-                            )}
-                        </tr>
-                        <tr>
-                             {repurchaseMatrix.developers.map(dev => (
-                                 <th key={dev} className="px-2 py-1 border border-slate-300 bg-slate-100 text-center text-xs font-mono min-w-[50px]">
-                                     {dev}
-                                 </th>
-                             ))}
-                        </tr>
-                     </thead>
-                     
-                     <tbody>
-                        {Object.keys(repurchaseMatrix.dataBySeller).sort().map(sellerName => {
-                             const rows = repurchaseMatrix.dataBySeller[sellerName];
-                             
-                             // Calculate totals for the header row
-                             const totalSellerPoints = rows.reduce((sum, r) => sum + r.actualSellerPoints, 0);
-                             const devTotals: Record<string, number> = {};
-                             repurchaseMatrix.developers.forEach(dev => {
-                                 devTotals[dev] = rows.reduce((sum, r) => r.originalDeveloper === dev ? sum + r.devPoints : sum, 0);
-                             });
-
-                             return (
-                                 <React.Fragment key={sellerName}>
-                                     {/* Section Header Row with Totals */}
-                                     <tr className="bg-slate-200/80 font-bold border-b border-slate-300">
-                                         <td colSpan={6} className="px-3 py-1.5 text-slate-800 border-r border-slate-300">
-                                             <div className="flex items-center gap-2">
-                                                <div className={`w-2 h-2 rounded-full ${getStoreColorClass(sellerName).split(' ')[0]}`}></div>
-                                                {sellerName}
-                                             </div>
-                                         </td>
-                                         {/* Total Seller Points */}
-                                         <td className="px-2 py-1 text-right font-mono font-bold text-amber-700 bg-amber-100/50 border-r border-slate-300">
-                                             {totalSellerPoints}
-                                         </td>
-                                         {/* Total Developer Points */}
-                                         {repurchaseMatrix.developers.map(dev => (
-                                              <td key={dev} className="px-2 py-1 text-right font-mono font-bold text-purple-700 bg-purple-100/50 border-r border-slate-300">
-                                                  {devTotals[dev]}
-                                              </td>
-                                         ))}
-                                     </tr>
-                                     
-                                     {/* Data Rows */}
-                                     {rows.map(row => {
-                                         const isReturn = row.status === Stage1Status.RETURN;
-                                         return (
-                                             <tr key={row.id} className="hover:bg-blue-50 border-b border-slate-200 last:border-0">
-                                                 <td className="px-2 py-1 border-r border-slate-200">{row.category}</td>
-                                                 <td className="px-2 py-1 border-r border-slate-200 font-mono">{row.date}</td>
-                                                 <td className="px-2 py-1 border-r border-slate-200 font-mono">{formatCID(row.customerID)}</td>
-                                                 <td className="px-2 py-1 border-r border-slate-200 font-mono text-xs">{row.itemID}</td>
-                                                 <td className="px-2 py-1 border-r border-slate-200 truncate max-w-[200px]" title={row.itemName}>{row.itemName}</td>
-                                                 <td className="px-2 py-1 border-r border-slate-200 text-xs text-gray-500">{row.repurchaseType || ''}</td>
-                                                 
-                                                 {/* Seller Points (Repurchase Points) */}
-                                                 <td className={`px-2 py-1 border-r border-slate-200 text-right font-mono font-bold bg-amber-50 ${isReturn ? 'text-red-600' : 'text-slate-800'}`}>
-                                                     {row.actualSellerPoints}
-                                                 </td>
-
-                                                 {/* Developer Points Matrix */}
-                                                 {repurchaseMatrix.developers.map(dev => {
-                                                     const isTargetDev = dev === row.originalDeveloper;
-                                                     return (
-                                                         <td key={dev} className={`px-2 py-1 border-r border-slate-200 text-right font-mono ${isTargetDev ? 'bg-purple-50 font-bold' : ''}`}>
-                                                             {isTargetDev ? (
-                                                                 <span className={isReturn ? 'text-red-600' : 'text-purple-700'}>
-                                                                     {row.devPoints}
-                                                                 </span>
-                                                             ) : ''}
-                                                         </td>
-                                                     );
-                                                 })}
-                                             </tr>
-                                         );
-                                     })}
-                                     
-                                     {/* Spacing Row */}
-                                     <tr className="bg-gray-50 h-2 border-t border-slate-200 border-b border-slate-300">
-                                         <td colSpan={7 + repurchaseMatrix.developers.length}></td>
-                                     </tr>
-                                 </React.Fragment>
-                             );
-                        })}
-                     </tbody>
-                  </table>
-               </div>
-             )}
-           </div>
         )}
 
         {/* ... (Rest of DataViewer) ... */}

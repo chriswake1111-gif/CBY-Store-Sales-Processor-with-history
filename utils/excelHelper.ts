@@ -45,7 +45,8 @@ export const exportToExcel = async (
     processedData: ProcessedData, 
     defaultFilename: string, 
     selectedPersons: Set<string>,
-    staffMasterList: StaffRecord[] = []
+    staffMasterList: StaffRecord[] = [],
+    reportDate?: string // New Parameter for Year/Month string
 ) => {
   // 1. Load All Templates
   const salesTmpl = await getTemplate(TEMPLATE_IDS.SALES);
@@ -107,12 +108,26 @@ export const exportToExcel = async (
         sheet = outWorkbook.addWorksheet(sheetName);
         // Copy headers up to startRow (default 20 if not set)
         copySheetModel(tmplSourceSheet, sheet, config?.startRow || 20);
+        
+        // Write Report Date to A1 if available
+        if (reportDate) {
+            const cell = sheet.getCell('A1');
+            cell.value = reportDate;
+            // Style is already copied by copySheetModel logic
+        }
+
     } else {
         // No Template: Create basic sheet
         sheet = outWorkbook.addWorksheet(sheetName);
         sheet.columns = [
             { width: 18 }, { width: 12 }, { width: 15 }, { width: 15 }, { width: 30 }, { width: 10 }, { width: 12 }, { width: 25 }, { width: 15 }
         ];
+        if (reportDate) {
+            sheet.mergeCells('A1:I1');
+            sheet.getCell('A1').value = reportDate;
+            sheet.getCell('A1').alignment = { horizontal: 'center' };
+            sheet.getCell('A1').font = { bold: true, size: 14 };
+        }
     }
     
     // GATHER DATA: COMBINE OWN DATA WITH INCOMING RETURNS
@@ -337,8 +352,12 @@ export const exportToExcel = async (
             }
         }
     } else {
-        // NO TEMPLATE MODE
+        // NO TEMPLATE MODE (Fallback)
         let startRow = 1;
+        
+        // Use a slightly different start row since we merged A1 for title
+        if (reportDate) startRow = 2;
+
         const addRow = (values: any[], isHeader = false, isSectionTitle = false) => {
             const row = sheet.getRow(startRow++);
             row.values = values;
@@ -441,20 +460,7 @@ export const exportToExcel = async (
   const matrixData: Record<string, RepurchaseRowData[]> = {};
   const developersSet = new Set<string>();
 
-  // Only selected persons' data logic, BUT Repurchase Summary typically involves "Who got dev points"
-  // The preview shows ALL data, so for export, we should also check all processed data or just selected?
-  // Usually export should reflect what's on screen (ALL) or what's selected?
-  // The preview uses `fullProcessedData`, so we should iterate all processedData
-  // HOWEVER, filtering by `selectedPersons` in the Staff Sheets loop implies user only wants specific reports.
-  // But Repurchase Matrix is a Summary. Let's stick to including everyone involved in the selected persons' scope?
-  // Or match the Preview exactly which shows everything. 
-  // Safety: Iterate `sortedPersons` (which is all keys).
-  
   for (const sellerName of sortedPersons) {
-      // If we want to filter rows only for selected sellers? 
-      // User said "Like Preview". Preview shows rows for all sellers.
-      // But if I unselect someone, maybe I don't want them in export?
-      // Let's filter by `selectedPersons` to be consistent with Staff Sheets behavior.
       if (!selectedPersons.has(sellerName)) continue;
 
       const sellerData = processedData[sellerName];
@@ -691,13 +697,19 @@ function copySheetModel(source: ExcelJS.Worksheet, target: ExcelJS.Worksheet, ma
         if (row.height) newRow.height = row.height;
         newRow.hidden = row.hidden;
         
-        if (rowNumber < maxRow) {
-             row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-                 const newCell = newRow.getCell(colNumber);
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+             const newCell = newRow.getCell(colNumber);
+             
+             // ALWAYS copy the style (font, border, fill, etc.) from the template
+             // This ensures fixed cells (e.g. at row 50) retain their bold/large formatting
+             applyCellStyle(newCell, cell);
+
+             // ONLY copy the value if it's in the "Header" area (above the list start)
+             // This prevents dummy data in the template list area from appearing in the export
+             if (rowNumber < maxRow) {
                  newCell.value = cell.value;
-                 applyCellStyle(newCell, cell);
-            });
-        }
+             }
+        });
     });
 
     const model = (source as any).model;

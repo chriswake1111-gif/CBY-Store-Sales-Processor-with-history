@@ -52,6 +52,7 @@ const App: React.FC = () => {
   
   const [repurchaseOptions, setRepurchaseOptions] = useState<RepurchaseOption[]>(DEFAULT_REPURCHASE_OPTIONS);
   const [staffMasterList, setStaffMasterList] = useState<StaffRecord[]>([]);
+  const [reportDate, setReportDate] = useState<string>(''); // New State for Year/Month
 
   const [staffRoles, setStaffRoles] = useState<Record<string, StaffRole>>({});
   const [isClassifying, setIsClassifying] = useState(false);
@@ -74,7 +75,7 @@ const App: React.FC = () => {
   const [lastSaveTime, setLastSaveTime] = useState<number | null>(null);
   const [hasSavedData, setHasSavedData] = useState<boolean>(false);
   
-  const stateRef = useRef({ exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList });
+  const stateRef = useRef({ exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList, reportDate });
 
   useEffect(() => {
     seedDefaultStores();
@@ -88,8 +89,8 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    stateRef.current = { exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList };
-  }, [exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList]);
+    stateRef.current = { exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList, reportDate };
+  }, [exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList, reportDate]);
 
   const handleForceRefresh = () => {
     if (window.confirm("確定要強制刷新程式嗎？這會清除瀏覽器快取並重新載入，未儲存的進度將會遺失。")) {
@@ -127,6 +128,7 @@ const App: React.FC = () => {
       setStaffRoles(saved.staffRoles || {});
       setRepurchaseOptions(saved.repurchaseOptions || DEFAULT_REPURCHASE_OPTIONS);
       setStaffMasterList(saved.staffMasterList || []);
+      setReportDate(saved.reportDate || '');
       setLastSaveTime(saved.timestamp);
       setHasSavedData(true);
       alert(`已還原 ${new Date(saved.timestamp).toLocaleString()} 的存檔`);
@@ -163,6 +165,25 @@ const App: React.FC = () => {
     setErrorMsg(null);
     try {
       const json = await readExcelFile(file);
+      
+      // --- Extract Date Logic ---
+      let extractedDate = '';
+      if (json.length > 0) {
+          // Find first row with a Ticket No ('單號')
+          const firstRow = json.find(r => r[COL_HEADERS.TICKET_NO] || r['單號']);
+          if (firstRow) {
+              const ticket = String(firstRow[COL_HEADERS.TICKET_NO] || firstRow['單號']).trim();
+              // Expecting format like 113110001 (YYYMM...)
+              if (ticket.length >= 5) {
+                  const yy = ticket.substring(0, 3);
+                  const mm = ticket.substring(3, 5);
+                  extractedDate = `${yy}年${mm}月`;
+              }
+          }
+      }
+      setReportDate(extractedDate);
+      // ---------------------------
+
       const people = new Set<string>();
       json.forEach((row: any) => {
         const p = row[COL_HEADERS.SALES_PERSON];
@@ -233,8 +254,8 @@ const App: React.FC = () => {
 
   const handleExportClick = async () => {
     if (!selectedPersons.size) return alert("請選擇銷售人員");
-    const defaultFilename = `獎金計算報表_${new Date().toISOString().slice(0,10)}`;
-    await exportToExcel(processedData, defaultFilename, selectedPersons, staffMasterList);
+    const defaultFilename = `獎金計算報表_${reportDate || new Date().toISOString().slice(0,10)}`;
+    await exportToExcel(processedData, defaultFilename, selectedPersons, staffMasterList, reportDate);
   };
 
   const setPersonData = (personId: string, transform: (p: ProcessedData[string]) => ProcessedData[string]) => {
@@ -256,7 +277,6 @@ const App: React.FC = () => {
     }));
   };
   
-  // Updated to include 'returnTarget'
   const handleUpdateStage1Action2 = (id: string, field: 'originalDeveloper' | 'repurchaseType' | 'returnTarget', val: string) => {
       if (!activePerson) return;
       setPersonData(activePerson, (data) => ({
@@ -264,7 +284,6 @@ const App: React.FC = () => {
           stage1: data.stage1.map(row => {
              if (row.id !== id) return row;
              const updated = { ...row, [field]: val };
-             // If changing return target or developer, recalculate points
              updated.calculatedPoints = recalculateStage1Points(updated, data.role);
              return updated;
           })
@@ -304,16 +323,12 @@ const App: React.FC = () => {
   const activeStaffRecord = useMemo(() => staffMasterList.find(s => s.name === activePerson), [staffMasterList, activePerson]);
   const currentData = useMemo(() => activePerson ? processedData[activePerson] : null, [processedData, activePerson]);
   
-  // Modified Stage 1 Total Points to handle "Incoming" and "Outgoing" returns
   const stage1TotalPoints = useMemo(() => {
     if (!currentData || !activePerson) return 0;
     
-    // 1. Calculate Own Points (Excluding Outgoing Returns)
     const ownPoints = currentData.stage1.reduce((sum, r) => {
-      // If marked as RETURN and has a target OTHER than self (should theoretically not happen as we don't move records), 
-      // but conceptually: if returnTarget is set, it means it's "transferred out"
       if (r.status === Stage1Status.RETURN && r.returnTarget) {
-          return sum; // Exclude from local sum
+          return sum; 
       }
       
       if (r.status === Stage1Status.DEVELOP || r.status === Stage1Status.HALF_YEAR || r.status === Stage1Status.REPURCHASE || r.status === Stage1Status.RETURN) {
@@ -322,23 +337,11 @@ const App: React.FC = () => {
       return sum;
     }, 0);
 
-    // 2. Add Incoming Returns (From other people targeting me)
     let incomingPoints = 0;
     Object.keys(processedData).forEach(otherPerson => {
         if (otherPerson === activePerson) return;
         processedData[otherPerson].stage1.forEach(r => {
             if (r.status === Stage1Status.RETURN && r.returnTarget === activePerson) {
-                // Re-calculate context for ME (the target)
-                // If I am the target, I take the hit. Logic is handled in recalculateStage1Points context usually.
-                // But recalculateStage1Points returns the deduction for the *row owner*.
-                // If row owner (Original Seller) is ME (target), the logic holds. 
-                // Wait, the row owner currently is the 'Processor' (otherPerson).
-                // We need the value that *I* should deduct.
-                // If I am the Original Seller (returnTarget), I take the full hit or 50% depending on Developer.
-                
-                // Reuse logic:
-                // If dev is selected, split. If dev is me? If dev is 3rd party?
-                // Standard Logic: Original Seller (Me) gets 50% or 100%.
                 const points = recalculateStage1Points(r, processedData[otherPerson].role);
                 incomingPoints += points;
             }
@@ -353,8 +356,8 @@ const App: React.FC = () => {
     activePerson, setActivePerson, currentData, activeTab, setActiveTab, stage1TotalPoints,
     handleStatusChangeStage1, handleToggleDeleteStage2, handleUpdateStage2CustomReward, onClose: isPopOut ? () => setIsPopOut(false) : undefined,
     handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord: activeStaffRecord,
-    // Pass full data for "Incoming Return" calculation in DataViewer
-    fullProcessedData: processedData 
+    fullProcessedData: processedData,
+    reportDate // Pass date to DataViewer
   };
   
   const classificationNames = useMemo(() => {
