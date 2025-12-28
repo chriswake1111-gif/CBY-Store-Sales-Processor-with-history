@@ -10,7 +10,7 @@ import PopoutWindow from './components/PopoutWindow';
 import DataViewer from './components/DataViewer';
 import StaffClassificationModal from './components/StaffClassificationModal';
 import HelpModal from './components/HelpModal';
-import HistoryManager from './components/HistoryManager';
+import HistoryDashboard from './components/HistoryDashboard'; // Updated Import
 import ExportSettingsModal from './components/ExportSettingsModal';
 import RepurchaseSettingsModal from './components/RepurchaseSettingsModal'; 
 import StaffManagerModal from './components/StaffManagerModal'; 
@@ -45,6 +45,8 @@ const DEFAULT_REPURCHASE_OPTIONS: RepurchaseOption[] = [
 ];
 
 const App: React.FC = () => {
+  const [viewMode, setViewMode] = useState<'CALCULATOR' | 'HISTORY'>('CALCULATOR');
+
   const [exclusionList, setExclusionList] = useState<ExclusionItem[]>([]);
   const [rewardRules, setRewardRules] = useState<RewardRule[]>([]);
   const [rawSalesData, setRawSalesData] = useState<RawRow[]>([]);
@@ -52,7 +54,7 @@ const App: React.FC = () => {
   
   const [repurchaseOptions, setRepurchaseOptions] = useState<RepurchaseOption[]>(DEFAULT_REPURCHASE_OPTIONS);
   const [staffMasterList, setStaffMasterList] = useState<StaffRecord[]>([]);
-  const [reportDate, setReportDate] = useState<string>(''); // New State for Year/Month
+  const [reportDate, setReportDate] = useState<string>(''); 
 
   const [staffRoles, setStaffRoles] = useState<Record<string, StaffRole>>({});
   const [isClassifying, setIsClassifying] = useState(false);
@@ -66,7 +68,6 @@ const App: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
   const [showHelp, setShowHelp] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
   const [showExportSettings, setShowExportSettings] = useState(false);
   const [showRepurchaseSettings, setShowRepurchaseSettings] = useState(false); 
   const [showStaffManager, setShowStaffManager] = useState(false); 
@@ -386,6 +387,12 @@ const App: React.FC = () => {
     return Array.from(s).sort();
   }, [pendingRawData]);
 
+  // --- RENDER HISTORY DASHBOARD ---
+  if (viewMode === 'HISTORY') {
+      return <HistoryDashboard onBack={() => setViewMode('CALCULATOR')} />;
+  }
+
+  // --- RENDER CALCULATOR ---
   return (
     <>
       <div className="flex flex-col h-screen bg-slate-100 font-sans text-slate-900">
@@ -399,7 +406,8 @@ const App: React.FC = () => {
                     <button onClick={() => setShowHelp(true)} className="text-slate-400 hover:text-white transition-colors" title="使用說明">
                       <HelpCircle size={18} />
                     </button>
-                    <button onClick={() => setShowHistory(true)} className="text-blue-300 hover:text-white transition-colors" title="歷史資料庫">
+                    {/* Switch to History Mode */}
+                    <button onClick={() => setViewMode('HISTORY')} className="text-blue-300 hover:text-white transition-colors" title="歷史資料庫管理中心">
                       <Database size={18} />
                     </button>
                     <button onClick={handleForceRefresh} className="text-red-300 hover:text-white transition-colors" title="強制重新整理 (清除快取)">
@@ -464,7 +472,7 @@ const App: React.FC = () => {
                 <FileSpreadsheet size={64} className="mb-4 text-slate-200" />
                 <p className="text-lg font-bold text-slate-400">等待資料匯入...</p>
                 <div className="flex gap-4 mt-8">
-                     <button onClick={() => setShowHistory(true)} className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-500 rounded hover:bg-slate-200 font-bold text-sm">
+                     <button onClick={() => setViewMode('HISTORY')} className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-500 rounded hover:bg-slate-200 font-bold text-sm">
                         <Database size={16}/> 管理歷史資料庫
                      </button>
                      <button onClick={() => setShowStaffManager(true)} className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-500 rounded hover:bg-slate-200 font-bold text-sm">
@@ -477,7 +485,7 @@ const App: React.FC = () => {
       {isPopOut && <PopoutWindow title="結果預覽" onClose={() => setIsPopOut(false)}><DataViewer {...dvProps} /></PopoutWindow>}
       {isClassifying && <StaffClassificationModal names={classificationNames} initialRoles={staffRoles} onConfirm={handleConfirmClassification} onCancel={handleCancelClassification} />}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
-      {showHistory && <HistoryManager onClose={() => setShowHistory(false)} />}
+      
       {showExportSettings && <ExportSettingsModal onClose={() => setShowExportSettings(false)} />}
       {showRepurchaseSettings && <RepurchaseSettingsModal options={repurchaseOptions} onSave={(opts) => { setRepurchaseOptions(opts); setShowRepurchaseSettings(false); }} onClose={() => setShowRepurchaseSettings(false)} />}
       {showStaffManager && <StaffManagerModal staffList={staffMasterList} onSave={(list) => { setStaffMasterList(list); setShowStaffManager(false); }} onClose={() => setShowStaffManager(false)} />}

@@ -7,11 +7,20 @@ export interface HistoryRecord {
   customerID: string;
   itemID: string;
   date: string; // YYYY-MM-DD or ROC Year (YYYMMDD...)
-  quantity: number; // Added quantity field
-  unit?: string; // New field: Unit
-  price?: number; // New: Unit Price from history
-  storeName?: string; // New field for Branch separation
-  salesPerson?: string; // New field for Sales Person
+  quantity: number; 
+  unit?: string; 
+  price?: number; // Unit Price
+  storeName?: string; 
+  salesPerson?: string; 
+  
+  // --- Fields for Analytics ---
+  itemName?: string; // 品名 (Human readable)
+  category?: string; // 品類 (For grouping)
+  amount?: number;   // 小計 (Sales Amount)
+  cost?: number;     // 成本 (For Profit Analysis)
+  profit?: number;   // 毛利 (For Profit Analysis)
+  points?: number;   // 點數 (For Point/Non-Point Analysis)
+
   // Optional field for display purposes (not stored in DB, but returned by queries)
   displayAlias?: string; 
 }
@@ -270,8 +279,7 @@ export const getHistoryStatsByStore = async (): Promise<{ storeName: string; cou
 };
 
 /**
- * Get unique years for a specific store's historical records
- * Updated to support ROC Year format (first 3 digits)
+ * Get unique years for a specific store
  */
 export const getAvailableYearsByStore = async (storeName: string): Promise<string[]> => {
   let records: HistoryRecord[];
@@ -283,27 +291,94 @@ export const getAvailableYearsByStore = async (storeName: string): Promise<strin
 
   const years = new Set<string>();
   records.forEach(r => {
-    const year = r.date ? String(r.date).substring(0, 3) : null;
-    if (year && /^\d{3}$/.test(year)) {
-      years.add(year);
-    }
+    // Assuming date format is ROC YYYMMDD e.g. 1131105 or YYYY-MM-DD
+    // If len 7 (1131105), year is substr(0,3). If 6 (990101), year is substr(0,2)
+    // We assume mostly 3 digit years (100+)
+    const d = String(r.date);
+    let y = '';
+    if (d.includes('-')) y = d.split('-')[0];
+    else if (d.length >= 7) y = d.substring(0, 3);
+    else if (d.length === 6) y = d.substring(0, 2);
+    
+    if (y) years.add(y);
   });
 
-  return Array.from(years).sort((a, b) => b.localeCompare(a)); // Newest years first
+  return Array.from(years).sort((a, b) => b.localeCompare(a));
 };
 
 /**
- * Delete specific year's data for a store
+ * NEW: Get months and record counts for a specific store and year
  */
+export const getMonthlyStatsByStoreAndYear = async (storeName: string, year: string): Promise<{ month: string; count: number }[]> => {
+    let records: HistoryRecord[];
+    
+    // 1. Fetch relevant records
+    if (storeName === '未分類 (舊資料)') {
+        records = await db.history.filter(r => !r.storeName).toArray();
+    } else {
+        records = await db.history.where('storeName').equals(storeName).toArray();
+    }
+
+    // 2. Filter by Year and Group by Month in Memory
+    const stats: Record<string, number> = {};
+    
+    records.forEach(r => {
+        const d = String(r.date);
+        let rYear = '';
+        let rMonth = '';
+
+        if (d.includes('-')) {
+             // YYYY-MM-DD
+             const parts = d.split('-');
+             rYear = parts[0];
+             rMonth = parts[1];
+        } else if (d.length >= 5) {
+             // ROC: 1131105 -> Y=113, M=11
+             if (d.length >= 7) {
+                 rYear = d.substring(0, 3);
+                 rMonth = d.substring(3, 5);
+             } else if (d.length === 6) {
+                 rYear = d.substring(0, 2);
+                 rMonth = d.substring(2, 4);
+             } else if (d.length === 5) {
+                  rYear = d.substring(0, 3);
+                  rMonth = d.substring(3, 5); // Just month part e.g. 11311
+             }
+        }
+
+        if (rYear === year) {
+            stats[rMonth] = (stats[rMonth] || 0) + 1;
+        }
+    });
+
+    return Object.entries(stats)
+        .map(([month, count]) => ({ month, count }))
+        .sort((a, b) => b.month.localeCompare(a.month));
+};
+
 export const deleteHistoryByYear = async (storeName: string, year: string) => {
   if (storeName === '未分類 (舊資料)') {
-    await db.history.filter(r => !r.storeName && String(r.date).substring(0, 3) === year).delete();
+    await db.history.filter(r => !r.storeName && String(r.date).startsWith(year)).delete();
   } else {
-    // Note: where('storeName') is indexed, then we filter by year logic
     await db.history.where('storeName').equals(storeName)
-      .filter(r => String(r.date).substring(0, 3) === year)
+      .filter(r => String(r.date).startsWith(year))
       .delete();
   }
+};
+
+/**
+ * NEW: Delete specific month's data
+ */
+export const deleteHistoryByMonth = async (storeName: string, year: string, month: string) => {
+    const targetPrefix = `${year}${month}`; // e.g., 11311
+    
+    if (storeName === '未分類 (舊資料)') {
+        await db.history.filter(r => !r.storeName && String(r.date).startsWith(targetPrefix)).delete();
+    } else {
+        await db.history.where('storeName').equals(storeName)
+            .filter(r => String(r.date).startsWith(targetPrefix))
+            .delete();
+    }
 };
 
 export const deleteStoreHistory = async (storeName: string) => {
