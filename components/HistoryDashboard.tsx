@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   LayoutDashboard, Database, Upload, Store, Settings, 
   ArrowLeft, HardDrive, PieChart, RefreshCw, Trash2, 
   Plus, Save, Edit2, X, FolderOpen, Calendar, ChevronRight, 
-  ChevronDown, FileText, CheckCircle2, AlertTriangle, Search
+  ChevronDown, FileText, CheckCircle2, AlertTriangle, Search, Play, List, FileSpreadsheet
 } from 'lucide-react';
 import { 
   getHistoryCount, clearHistory, bulkAddHistory, HistoryRecord, 
@@ -24,6 +24,16 @@ const CHUNK_SIZE = 2000;
 
 type DashboardView = 'OVERVIEW' | 'EXPLORER' | 'IMPORT' | 'STORES';
 
+// Queue Item Interface
+interface ImportQueueItem {
+    id: string;
+    file: File;
+    targetStore: string;
+    status: 'pending' | 'processing' | 'success' | 'error';
+    progress: number;
+    message?: string;
+}
+
 const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
   const [activeView, setActiveView] = useState<DashboardView>('OVERVIEW');
   const [totalRecords, setTotalRecords] = useState(0);
@@ -37,11 +47,10 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
   const [expandedYear, setExpandedYear] = useState<string | null>(null);
   const [monthlyStats, setMonthlyStats] = useState<{ month: string, count: number }[]>([]);
 
-  // Import State
-  const [importTargetStore, setImportTargetStore] = useState('');
-  const [importProgress, setImportProgress] = useState(0);
-  const [importMessage, setImportMessage] = useState('');
-  const [importStatus, setImportStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
+  // Import Queue State (New)
+  const [importQueue, setImportQueue] = useState<ImportQueueItem[]>([]);
+  const [isBatchRunning, setIsBatchRunning] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Store Management State
   const [newStoreName, setNewStoreName] = useState('');
@@ -128,81 +137,122 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
       setIsProcessing(false);
   };
 
-  // --- IMPORT LOGIC ---
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-        const file = e.target.files[0];
-        // Auto-detect store
-        const found = availableStores.find(s => file.name.includes(s.name));
-        if (found) setImportTargetStore(found.name);
-        handleImport(file);
-    }
-    e.target.value = '';
+  // --- BATCH IMPORT LOGIC ---
+  
+  const handleFilesSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0) {
+          const newItems: ImportQueueItem[] = Array.from(e.target.files).map((file: File) => {
+              // Auto-detect store from filename
+              const foundStore = availableStores.find(s => file.name.includes(s.name));
+              return {
+                  id: Math.random().toString(36).substr(2, 9),
+                  file: file,
+                  targetStore: foundStore ? foundStore.name : '',
+                  status: 'pending',
+                  progress: 0
+              };
+          });
+          setImportQueue(prev => [...prev, ...newItems]);
+      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleImport = async (file: File) => {
-      if (!importTargetStore) {
-          alert("請先選擇目標分店！");
-          return;
-      }
-      setImportStatus('processing');
-      setImportMessage(`正在讀取檔案：${file.name}`);
-      setImportProgress(0);
+  const updateQueueItemStore = (id: string, storeName: string) => {
+      setImportQueue(prev => prev.map(item => item.id === id ? { ...item, targetStore: storeName } : item));
+  };
 
-      try {
-        const json = await readExcelFile(file);
-        const storeName = importTargetStore;
-        
-        let processed = 0;
-        let buffer: HistoryRecord[] = [];
+  const removeQueueItem = (id: string) => {
+      setImportQueue(prev => prev.filter(item => item.id !== id));
+  };
 
-        for (let i = 0; i < json.length; i++) {
-            const row = json[i] as any;
-            const cid = String(row[COL_HEADERS.CUSTOMER_ID] || '').trim();
-            const itemID = String(row[COL_HEADERS.ITEM_ID] || '').trim();
+  const clearCompletedQueue = () => {
+      setImportQueue(prev => prev.filter(item => item.status !== 'success'));
+  };
 
-            if (cid && itemID && cid !== 'undefined' && itemID !== 'undefined') {
-                 // Basic Fields
-                 const qty = Number(row[COL_HEADERS.QUANTITY]) || 0;
-                 const price = Number(row[COL_HEADERS.UNIT_PRICE] || row['單價'] || 0);
-                 const unit = String(row[COL_HEADERS.UNIT] || row['單位'] || '').trim();
-                 const dateStr = String(row[COL_HEADERS.SALES_DATE] || row[COL_HEADERS.TICKET_NO] || '').trim();
-                 const salesPerson = String(row[COL_HEADERS.SALES_PERSON] || '').trim();
+  // Core Processing Function for a single file
+  const processSingleFile = async (item: ImportQueueItem, updateProgress: (pct: number) => void) => {
+      if (!item.targetStore) throw new Error("未指定目標分店");
+      
+      const json = await readExcelFile(item.file);
+      const storeName = item.targetStore;
+      
+      let processed = 0;
+      let buffer: HistoryRecord[] = [];
 
-                 // Enhanced Fields for Analytics
-                 const itemName = String(row[COL_HEADERS.ITEM_NAME] || row['品項名稱'] || row['品名'] || '').trim();
-                 const cost = Number(row['成本'] || row['Cost'] || 0);
-                 const profit = Number(row['毛利'] || row['Profit'] || 0);
-                 const amount = Number(row[COL_HEADERS.SUBTOTAL] || row['小計'] || row['Amount'] || 0);
-                 const category = String(row[COL_HEADERS.CAT_1] || row['品類一'] || row['Category'] || '').trim();
-                 const points = Number(row[COL_HEADERS.POINTS] || row['點數'] || row['Points'] || 0);
+      for (let i = 0; i < json.length; i++) {
+          const row = json[i] as any;
+          const cid = String(row[COL_HEADERS.CUSTOMER_ID] || '').trim();
+          const itemID = String(row[COL_HEADERS.ITEM_ID] || '').trim();
 
-                 buffer.push({
+          if (cid && itemID && cid !== 'undefined' && itemID !== 'undefined') {
+                const qty = Number(row[COL_HEADERS.QUANTITY]) || 0;
+                const price = Number(row[COL_HEADERS.UNIT_PRICE] || row['單價'] || 0);
+                const unit = String(row[COL_HEADERS.UNIT] || row['單位'] || '').trim();
+                const dateStr = String(row[COL_HEADERS.SALES_DATE] || row[COL_HEADERS.TICKET_NO] || '').trim();
+                const salesPerson = String(row[COL_HEADERS.SALES_PERSON] || '').trim();
+
+                const itemName = String(row[COL_HEADERS.ITEM_NAME] || row['品項名稱'] || row['品名'] || '').trim();
+                const cost = Number(row['成本'] || row['Cost'] || 0);
+                const profit = Number(row['毛利'] || row['Profit'] || 0);
+                const amount = Number(row[COL_HEADERS.SUBTOTAL] || row['小計'] || row['Amount'] || 0);
+                const category = String(row[COL_HEADERS.CAT_1] || row['品類一'] || row['Category'] || '').trim();
+                const points = Number(row[COL_HEADERS.POINTS] || row['點數'] || row['Points'] || 0);
+
+                buffer.push({
                     customerID: cid, itemID, date: dateStr, quantity: qty,
                     price, unit, storeName, salesPerson,
-                    // New fields
                     itemName, cost, profit, amount, category, points
-                 });
-            }
+                });
+          }
 
-            if (buffer.length >= CHUNK_SIZE || i === json.length - 1) {
-                if (buffer.length > 0) {
-                    await bulkAddHistory(buffer);
-                    processed += buffer.length;
-                    buffer = [];
-                }
-                setImportProgress(Math.round(((i+1) / json.length) * 100));
-                await new Promise(r => setTimeout(r, 0));
-            }
-        }
-        
-        await refreshGlobalStats();
-        setImportStatus('success');
-        setImportMessage(`匯入完成！成功寫入 ${processed.toLocaleString()} 筆資料`);
-      } catch (err: any) {
-          setImportStatus('error');
-          setImportMessage(`匯入失敗：${err.message}`);
+          if (buffer.length >= CHUNK_SIZE || i === json.length - 1) {
+              if (buffer.length > 0) {
+                  await bulkAddHistory(buffer);
+                  processed += buffer.length;
+                  buffer = [];
+              }
+              const pct = Math.round(((i+1) / json.length) * 100);
+              updateProgress(pct);
+              await new Promise(r => setTimeout(r, 0)); // Yield to UI
+          }
       }
+      return processed;
+  };
+
+  const startBatchImport = async () => {
+      const pendingItems = importQueue.filter(i => i.status === 'pending');
+      if (pendingItems.length === 0) return;
+      if (pendingItems.some(i => !i.targetStore)) {
+          alert("請確保所有待處理檔案都已選擇目標分店！");
+          return;
+      }
+
+      setIsBatchRunning(true);
+      setIsProcessing(true); // Global indicator
+
+      // Iterate through current queue state (we use a loop to process sequentially)
+      // Note: We access the current queue via a snapshot but we update the state via functional updates
+      for (const item of pendingItems) {
+          // 1. Mark as processing
+          setImportQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'processing', progress: 0 } : q));
+          
+          try {
+              // 2. Process
+              const processedCount = await processSingleFile(item, (pct) => {
+                  setImportQueue(prev => prev.map(q => q.id === item.id ? { ...q, progress: pct } : q));
+              });
+
+              // 3. Mark as success
+              setImportQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'success', progress: 100, message: `成功 (${processedCount} 筆)` } : q));
+          } catch (err: any) {
+              // 4. Mark as error
+              setImportQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'error', message: err.message } : q));
+          }
+      }
+
+      setIsBatchRunning(false);
+      setIsProcessing(false);
+      await refreshGlobalStats();
   };
 
   // --- STORE SETTINGS LOGIC ---
@@ -288,7 +338,7 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
                         <h2 className="text-2xl font-black text-slate-800">
                             {activeView === 'OVERVIEW' && '總覽儀表板'}
                             {activeView === 'EXPLORER' && '資料瀏覽器'}
-                            {activeView === 'IMPORT' && '資料匯入'}
+                            {activeView === 'IMPORT' && '排程匯入工具'}
                             {activeView === 'STORES' && '分店設定'}
                         </h2>
                         <p className="text-slate-500 text-sm mt-1">管理與分析您的歷史銷售紀錄</p>
@@ -444,67 +494,134 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
                     </div>
                 )}
 
-                {/* --- IMPORT --- */}
+                {/* --- IMPORT (BATCH QUEUE) --- */}
                 {activeView === 'IMPORT' && (
-                    <div className="max-w-2xl mx-auto">
-                        <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-200">
-                            <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
-                                <Upload className="text-blue-500"/> 匯入歷史銷售資料
+                    <div className="max-w-4xl mx-auto space-y-4">
+                        
+                        {/* 1. Control Panel */}
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                            <h3 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
+                                <List className="text-blue-500"/> 排程匯入清單 (Queue)
                             </h3>
+                            <p className="text-sm text-slate-500 mb-6">您可以一次選取多個檔案，系統將自動排程依序匯入，避免瀏覽器過載。</p>
                             
-                            <div className="mb-6">
-                                <label className="block text-sm font-bold text-slate-600 mb-2">1. 選擇歸屬分店</label>
-                                <div className="relative">
-                                    <select 
-                                        value={importTargetStore} 
-                                        onChange={(e) => setImportTargetStore(e.target.value)}
-                                        className="w-full p-3 border border-gray-300 rounded-lg appearance-none font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none"
-                                    >
-                                        <option value="">請下拉選擇分店...</option>
-                                        {availableStores.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                                    </select>
-                                    <ChevronDown className="absolute right-3 top-3.5 text-gray-400 pointer-events-none" size={20}/>
-                                </div>
-                            </div>
-
-                            <div className="mb-8">
-                                <label className="block text-sm font-bold text-slate-600 mb-2">2. 上傳 Excel 檔案</label>
+                            <div className="flex gap-4 items-center">
                                 <label className={`
-                                    flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-xl cursor-pointer transition-all
-                                    ${importStatus === 'processing' ? 'bg-gray-50 border-gray-300' : 'bg-blue-50 border-blue-300 hover:bg-blue-100'}
+                                    flex items-center gap-2 px-6 py-3 rounded-lg cursor-pointer transition-all font-bold shadow-sm
+                                    ${isBatchRunning ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100'}
                                 `}>
-                                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                        {importStatus === 'processing' ? (
-                                            <RefreshCw className="w-10 h-10 mb-3 text-blue-500 animate-spin" />
-                                        ) : (
-                                            <Upload className="w-10 h-10 mb-3 text-blue-500" />
-                                        )}
-                                        <p className="mb-2 text-sm text-slate-600 font-bold">點擊上傳或拖曳檔案至此</p>
-                                        <p className="text-xs text-slate-400">支援 .xlsx, .xls 格式</p>
-                                    </div>
-                                    <input type="file" className="hidden" accept=".xlsx, .xls" onChange={handleFileSelect} disabled={importStatus === 'processing'} />
+                                    <Plus size={18}/> 加入檔案 (可多選)
+                                    <input 
+                                        type="file" 
+                                        ref={fileInputRef}
+                                        className="hidden" 
+                                        accept=".xlsx, .xls" 
+                                        multiple 
+                                        onChange={handleFilesSelect} 
+                                        disabled={isBatchRunning} 
+                                    />
                                 </label>
-                            </div>
 
-                            {importStatus !== 'idle' && (
-                                <div className={`p-4 rounded-lg flex items-start gap-3 ${
-                                    importStatus === 'error' ? 'bg-red-50 text-red-800 border border-red-200' : 
-                                    importStatus === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 
-                                    'bg-blue-50 text-blue-800 border border-blue-200'
-                                }`}>
-                                    {importStatus === 'error' ? <AlertTriangle className="shrink-0 mt-0.5" size={18}/> : 
-                                     importStatus === 'success' ? <CheckCircle2 className="shrink-0 mt-0.5" size={18}/> : 
-                                     <RefreshCw className="shrink-0 mt-0.5 animate-spin" size={18}/>}
-                                    <div className="flex-1">
-                                        <div className="font-bold text-sm">{importMessage}</div>
-                                        {importStatus === 'processing' && (
-                                            <div className="w-full bg-blue-200 rounded-full h-1.5 mt-2">
-                                                <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${importProgress}%` }}></div>
-                                            </div>
-                                        )}
+                                <div className="h-8 w-px bg-gray-300 mx-2"></div>
+
+                                <button 
+                                    onClick={startBatchImport}
+                                    disabled={isBatchRunning || importQueue.filter(i => i.status === 'pending').length === 0}
+                                    className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 disabled:bg-gray-300 disabled:text-gray-500 shadow-md transition-all"
+                                >
+                                    {isBatchRunning ? <RefreshCw className="animate-spin" size={18}/> : <Play size={18}/>}
+                                    {isBatchRunning ? '正在處理排程...' : '開始排程匯入'}
+                                </button>
+                                
+                                {importQueue.some(i => i.status === 'success') && !isBatchRunning && (
+                                    <button onClick={clearCompletedQueue} className="ml-auto text-sm text-gray-400 hover:text-gray-600 flex items-center gap-1">
+                                        <Trash2 size={14}/> 清除已完成項目
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* 2. Queue List */}
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden min-h-[300px]">
+                            <div className="bg-slate-50 px-6 py-3 border-b border-gray-200 grid grid-cols-12 gap-4 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                <div className="col-span-5">檔案名稱</div>
+                                <div className="col-span-3">目標分店 (自動偵測)</div>
+                                <div className="col-span-3">狀態 / 進度</div>
+                                <div className="col-span-1 text-center">操作</div>
+                            </div>
+                            
+                            <div className="divide-y divide-gray-100">
+                                {importQueue.length === 0 ? (
+                                    <div className="p-12 text-center text-gray-300 flex flex-col items-center">
+                                        <FileSpreadsheet size={48} className="mb-4 opacity-30"/>
+                                        <p>目前清單是空的，請點擊上方按鈕加入 Excel 檔案。</p>
                                     </div>
-                                </div>
-                            )}
+                                ) : (
+                                    importQueue.map(item => (
+                                        <div key={item.id} className={`grid grid-cols-12 gap-4 px-6 py-3 items-center hover:bg-slate-50 transition-colors ${item.status === 'processing' ? 'bg-blue-50/50' : ''}`}>
+                                            <div className="col-span-5 flex items-center gap-3 overflow-hidden">
+                                                <div className={`p-2 rounded-lg shrink-0 ${item.status === 'success' ? 'bg-emerald-100 text-emerald-600' : item.status === 'error' ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500'}`}>
+                                                    <FileText size={16}/>
+                                                </div>
+                                                <div className="truncate font-medium text-slate-700 text-sm" title={item.file.name}>{item.file.name}</div>
+                                            </div>
+                                            
+                                            <div className="col-span-3">
+                                                {item.status === 'pending' ? (
+                                                    <div className="relative">
+                                                        <select 
+                                                            value={item.targetStore}
+                                                            onChange={(e) => updateQueueItemStore(item.id, e.target.value)}
+                                                            className={`w-full text-xs font-bold py-1.5 pl-2 pr-6 rounded border appearance-none outline-none focus:ring-2 focus:ring-blue-300 ${!item.targetStore ? 'border-red-300 bg-red-50 text-red-700' : 'border-gray-300 text-slate-700'}`}
+                                                        >
+                                                            <option value="">請選擇分店...</option>
+                                                            {availableStores.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                                                        </select>
+                                                        <ChevronDown className="absolute right-2 top-2 text-gray-400 pointer-events-none" size={14}/>
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-xs font-bold text-slate-600 px-2 py-1 bg-gray-100 rounded border border-gray-200">{item.targetStore}</span>
+                                                )}
+                                            </div>
+
+                                            <div className="col-span-3">
+                                                {item.status === 'pending' && <span className="text-xs text-gray-400 font-mono">等待中...</span>}
+                                                {item.status === 'processing' && (
+                                                    <div className="w-full">
+                                                        <div className="flex justify-between text-[10px] text-blue-600 font-bold mb-1">
+                                                            <span>匯入中...</span>
+                                                            <span>{item.progress}%</span>
+                                                        </div>
+                                                        <div className="h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                                                            <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${item.progress}%` }}></div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {item.status === 'success' && (
+                                                    <div className="text-xs text-emerald-600 font-bold flex items-center gap-1">
+                                                        <CheckCircle2 size={14}/> {item.message || '完成'}
+                                                    </div>
+                                                )}
+                                                {item.status === 'error' && (
+                                                    <div className="text-xs text-red-600 font-bold flex items-center gap-1" title={item.message}>
+                                                        <AlertTriangle size={14}/> 失敗
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="col-span-1 text-center">
+                                                {item.status === 'pending' || item.status === 'error' ? (
+                                                    <button onClick={() => removeQueueItem(item.id)} className="text-gray-300 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors">
+                                                        <X size={16}/>
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-gray-200">-</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}
