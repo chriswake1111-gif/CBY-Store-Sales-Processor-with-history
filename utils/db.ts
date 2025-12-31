@@ -379,3 +379,101 @@ export const deleteProductGroup = async (id: number) => {
   await db.productGroups.delete(id);
   await refreshGroupCache();
 };
+
+// --- DATABASE BACKUP / RESTORE ---
+
+export const exportDatabaseToJson = async (): Promise<string> => {
+    // We only export essential tables: history, stores, productGroups
+    // Templates are heavy (ArrayBuffer) and optional, we can include them if needed but might bloat the JSON.
+    // Let's include everything to be safe.
+    
+    // We need to convert ArrayBuffers in templates to Base64 for JSON storage
+    const bufferToBase64 = (buffer: ArrayBuffer) => {
+        let binary = '';
+        const bytes = new Uint8Array(buffer);
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return window.btoa(binary);
+    };
+
+    const history = await db.history.toArray();
+    const stores = await db.stores.toArray();
+    const productGroups = await db.productGroups.toArray();
+    const templatesRaw = await db.templates.toArray();
+    
+    const templates = templatesRaw.map(t => ({
+        ...t,
+        data: bufferToBase64(t.data) // Convert to string
+    }));
+
+    const exportData = {
+        version: 1,
+        timestamp: Date.now(),
+        tables: {
+            history,
+            stores,
+            productGroups,
+            templates
+        }
+    };
+
+    return JSON.stringify(exportData);
+};
+
+export const importDatabaseFromJson = async (jsonString: string): Promise<number> => {
+    try {
+        const data = JSON.parse(jsonString);
+        if (!data.tables) throw new Error("無效的備份檔案格式");
+
+        const base64ToBuffer = (base64: string) => {
+            const binary_string = window.atob(base64);
+            const len = binary_string.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binary_string.charCodeAt(i);
+            }
+            return bytes.buffer;
+        };
+
+        // Use transaction to ensure integrity
+        await db.transaction('rw', db.history, db.stores, db.productGroups, db.templates, async () => {
+            // 1. Clear existing
+            await db.history.clear();
+            await db.stores.clear();
+            await db.productGroups.clear();
+            await db.templates.clear();
+
+            // 2. Import History
+            if (data.tables.history && data.tables.history.length > 0) {
+                // Chunk insert to avoid memory issues
+                const chunkSize = 2000;
+                for (let i = 0; i < data.tables.history.length; i += chunkSize) {
+                    await db.history.bulkAdd(data.tables.history.slice(i, i + chunkSize));
+                }
+            }
+
+            // 3. Import Stores
+            if (data.tables.stores) await db.stores.bulkAdd(data.tables.stores);
+
+            // 4. Import Groups
+            if (data.tables.productGroups) await db.productGroups.bulkAdd(data.tables.productGroups);
+
+            // 5. Import Templates
+            if (data.tables.templates) {
+                const processedTemplates = data.tables.templates.map((t: any) => ({
+                    ...t,
+                    data: base64ToBuffer(t.data)
+                }));
+                await db.templates.bulkAdd(processedTemplates);
+            }
+        });
+        
+        await refreshGroupCache(); // Refresh memory cache
+        return data.tables.history.length;
+    } catch (e) {
+        console.error(e);
+        throw new Error("還原失敗，檔案可能損毀或格式不符");
+    }
+};

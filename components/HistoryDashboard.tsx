@@ -5,14 +5,14 @@ import {
   PieChart, RefreshCw, Trash2, Plus, Save, Edit2, X, FolderOpen, 
   Calendar, ChevronRight, ChevronDown, FileText, CheckCircle2, 
   AlertTriangle, Search, Play, List, FileSpreadsheet, StopCircle, 
-  Table as TableIcon, ArrowDownCircle
+  Table as TableIcon, ArrowDownCircle, Download, ArchiveRestore
 } from 'lucide-react';
 import { 
   getHistoryCount, clearHistory, bulkAddHistory, HistoryRecord, 
   getHistoryStatsByStore, deleteStoreHistory, getStores, 
   addStore, updateStore, deleteStore, getAvailableYearsByStore, 
   deleteHistoryByYear, getMonthlyStatsByStoreAndYear, deleteHistoryByMonth,
-  getHistoryByMonth
+  getHistoryByMonth, exportDatabaseToJson, importDatabaseFromJson
 } from '../utils/db';
 import { readExcelFile } from '../utils/excelHelper';
 import { COL_HEADERS } from '../constants';
@@ -59,6 +59,7 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
   const [isBatchRunning, setIsBatchRunning] = useState(false);
   const stopBatchRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const backupInputRef = useRef<HTMLInputElement>(null); // For Restore
 
   // Store Management State
   const [newStoreName, setNewStoreName] = useState('');
@@ -154,7 +155,6 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
       setIsProcessing(false);
   };
 
-  // Added missing handleAddStore function to fix the error
   const handleAddStore = async () => {
     if (!newStoreName.trim()) return;
     try {
@@ -166,7 +166,6 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
     }
   };
 
-  // Added local handler for updating store names
   const handleUpdateStoreLocal = async () => {
     if (editingStoreId && editingStoreName.trim()) {
       await updateStore(editingStoreId, editingStoreName.trim());
@@ -175,12 +174,67 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
     }
   };
 
-  // Added local handler for deleting store records
   const handleDeleteStoreLocal = async (id: number, name: string) => {
     if (confirm(`確定移除 ${name}？`)) {
       await deleteStore(id);
       await loadStores();
     }
+  };
+
+  // --- BACKUP & RESTORE ---
+  
+  const handleBackup = async () => {
+      setIsProcessing(true);
+      try {
+          const json = await exportDatabaseToJson();
+          const blob = new Blob([json], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+          link.download = `StoreSales_Backup_${dateStr}.json`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+      } catch (e) {
+          alert("備份失敗: " + e);
+      } finally {
+          setIsProcessing(false);
+      }
+  };
+
+  const handleRestoreClick = () => {
+      if (backupInputRef.current) backupInputRef.current.click();
+  };
+
+  const handleRestoreFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files || !e.target.files[0]) return;
+      if (!confirm("警告：還原操作將會「完全覆蓋」並清除目前的資料庫。\n\n確定要繼續嗎？")) {
+          e.target.value = '';
+          return;
+      }
+
+      setIsProcessing(true);
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      
+      reader.onload = async (ev) => {
+          try {
+              const jsonStr = ev.target?.result as string;
+              const count = await importDatabaseFromJson(jsonStr);
+              await refreshGlobalStats();
+              await loadStores();
+              alert(`還原成功！已恢復 ${count.toLocaleString()} 筆歷史資料。`);
+          } catch (err: any) {
+              alert("還原失敗：" + err.message);
+          } finally {
+              setIsProcessing(false);
+              if (backupInputRef.current) backupInputRef.current.value = '';
+          }
+      };
+      
+      reader.readAsText(file);
   };
 
   // --- BATCH IMPORT LOGIC ---
@@ -548,8 +602,22 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
                         </div>
                         <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
                             <div className="px-8 py-5 border-b bg-slate-50 flex justify-between items-center">
-                                <h3 className="font-black text-slate-700 flex items-center gap-2"><PieChart size={20}/> 分店資料分析</h3>
-                                <button onClick={handleClearAll} className="text-xs font-bold text-red-500 hover:text-red-700">清空資料庫</button>
+                                <div className="flex items-center gap-4">
+                                    <h3 className="font-black text-slate-700 flex items-center gap-2"><PieChart size={20}/> 分店資料分析</h3>
+                                    {/* Backup & Restore Controls */}
+                                    <div className="flex items-center gap-2 ml-4 border-l pl-4 border-slate-300">
+                                        <button onClick={handleBackup} disabled={isProcessing} className="flex items-center gap-1 px-3 py-1.5 bg-blue-100 text-blue-700 text-xs font-bold rounded hover:bg-blue-200 transition-colors">
+                                            <Download size={14} /> 備份資料庫 (下載)
+                                        </button>
+                                        <button onClick={handleRestoreClick} disabled={isProcessing} className="flex items-center gap-1 px-3 py-1.5 bg-amber-100 text-amber-700 text-xs font-bold rounded hover:bg-amber-200 transition-colors">
+                                            <ArchiveRestore size={14} /> 還原資料庫
+                                        </button>
+                                        <input type="file" ref={backupInputRef} onChange={handleRestoreFile} accept=".json" className="hidden" />
+                                    </div>
+                                </div>
+                                <button onClick={handleClearAll} className="text-xs font-bold text-red-500 hover:text-red-700 flex items-center gap-1 bg-red-50 px-3 py-1.5 rounded hover:bg-red-100">
+                                    <Trash2 size={14}/> 清空資料庫
+                                </button>
                             </div>
                             <div className="divide-y divide-gray-100">
                                 {storeStats.map((s, idx) => (
