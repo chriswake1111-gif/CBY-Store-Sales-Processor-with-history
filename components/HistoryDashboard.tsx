@@ -12,7 +12,7 @@ import {
   getHistoryStatsByStore, deleteStoreHistory, getStores, 
   addStore, updateStore, deleteStore, getAvailableYearsByStore, 
   deleteHistoryByYear, getMonthlyStatsByStoreAndYear, deleteHistoryByMonth,
-  getHistoryByMonth, exportDatabaseToJson, importDatabaseFromJson
+  getHistoryByMonth, exportDatabaseToJson, importDatabaseFromJson, seedDefaultStores
 } from '../utils/db';
 import { readExcelFile } from '../utils/excelHelper';
 import { COL_HEADERS } from '../constants';
@@ -96,7 +96,12 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
   };
 
   const loadStores = async () => {
-    const list = await getStores();
+    let list = await getStores();
+    if (list.length === 0) {
+        // Self-heal: If empty, try seeding defaults again
+        await seedDefaultStores();
+        list = await getStores();
+    }
     setAvailableStores(list);
   };
 
@@ -162,7 +167,8 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
       setNewStoreName('');
       await loadStores();
     } catch (e) {
-      alert("新增分店失敗，名稱可能重複");
+      console.error(e);
+      alert("新增分店失敗，名稱可能重複或資料庫異常");
     }
   };
 
@@ -224,7 +230,7 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
               const jsonStr = ev.target?.result as string;
               const count = await importDatabaseFromJson(jsonStr);
               await refreshGlobalStats();
-              await loadStores();
+              await loadStores(); // Reload stores after import
               alert(`還原成功！已恢復 ${count.toLocaleString()} 筆歷史資料。`);
           } catch (err: any) {
               alert("還原失敗：" + err.message);
@@ -578,60 +584,6 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
                                         </div>
                                     ))
                                 }
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* --- OVERVIEW --- */}
-                {activeView === 'OVERVIEW' && (
-                    <div className="space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-100 flex items-center justify-between">
-                                <div><div className="text-slate-400 text-xs font-black uppercase tracking-widest mb-1">總筆數</div><div className="text-3xl font-black text-slate-800 font-mono">{totalRecords.toLocaleString()}</div></div>
-                                <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl"><HardDrive size={32}/></div>
-                            </div>
-                            <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-100 flex items-center justify-between">
-                                <div><div className="text-slate-400 text-xs font-black uppercase tracking-widest mb-1">店數</div><div className="text-3xl font-black text-slate-800 font-mono">{availableStores.length}</div></div>
-                                <div className="p-4 bg-purple-50 text-purple-600 rounded-2xl"><Store size={32}/></div>
-                            </div>
-                            <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-100 flex items-center justify-between">
-                                <div><div className="text-slate-400 text-xs font-black uppercase tracking-widest mb-1">系統狀態</div><div className="text-xl font-black text-emerald-600">快速運行中</div></div>
-                                <div className="p-4 bg-emerald-50 text-emerald-600 rounded-2xl"><CheckCircle2 size={32}/></div>
-                            </div>
-                        </div>
-                        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
-                            <div className="px-8 py-5 border-b bg-slate-50 flex justify-between items-center">
-                                <div className="flex items-center gap-4">
-                                    <h3 className="font-black text-slate-700 flex items-center gap-2"><PieChart size={20}/> 分店資料分析</h3>
-                                    {/* Backup & Restore Controls */}
-                                    <div className="flex items-center gap-2 ml-4 border-l pl-4 border-slate-300">
-                                        <button onClick={handleBackup} disabled={isProcessing} className="flex items-center gap-1 px-3 py-1.5 bg-blue-100 text-blue-700 text-xs font-bold rounded hover:bg-blue-200 transition-colors">
-                                            <Download size={14} /> 備份資料庫 (下載)
-                                        </button>
-                                        <button onClick={handleRestoreClick} disabled={isProcessing} className="flex items-center gap-1 px-3 py-1.5 bg-amber-100 text-amber-700 text-xs font-bold rounded hover:bg-amber-200 transition-colors">
-                                            <ArchiveRestore size={14} /> 還原資料庫
-                                        </button>
-                                        <input type="file" ref={backupInputRef} onChange={handleRestoreFile} accept=".json" className="hidden" />
-                                    </div>
-                                </div>
-                                <button onClick={handleClearAll} className="text-xs font-bold text-red-500 hover:text-red-700 flex items-center gap-1 bg-red-50 px-3 py-1.5 rounded hover:bg-red-100">
-                                    <Trash2 size={14}/> 清空資料庫
-                                </button>
-                            </div>
-                            <div className="divide-y divide-gray-100">
-                                {storeStats.map((s, idx) => (
-                                    <div key={idx} className="px-8 py-5 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                                        <div className="flex items-center gap-4">
-                                            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center font-black text-slate-500">{s.storeName.substring(0, 1)}</div>
-                                            <div className="font-black text-slate-800">{s.storeName}</div>
-                                        </div>
-                                        <div className="flex items-center gap-6">
-                                            <div className="text-right"><div className="font-mono font-black text-slate-700">{s.count.toLocaleString()}</div><div className="text-[10px] text-slate-400 font-bold uppercase">RECORDS</div></div>
-                                            <button onClick={() => handleDeleteStoreData(s.storeName)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"><Trash2 size={18} /></button>
-                                        </div>
-                                    </div>
-                                ))}
                             </div>
                         </div>
                     </div>
