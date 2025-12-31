@@ -14,26 +14,21 @@ export interface HistoryRecord {
   salesPerson?: string; 
   
   // --- Fields for Analytics ---
-  itemName?: string; // 品名 (Human readable)
-  category?: string; // 品類 (For grouping)
-  amount?: number;   // 小計 (Sales Amount)
-  cost?: number;     // 成本 (For Profit Analysis)
-  profit?: number;   // 毛利 (For Profit Analysis)
-  points?: number;   // 點數 (For Point/Non-Point Analysis)
+  itemName?: string; 
+  category?: string; 
+  amount?: number;   
+  cost?: number;     
+  profit?: number;   
+  points?: number;   
 
-  // Optional field for display purposes (not stored in DB, but returned by queries)
   displayAlias?: string; 
 }
 
 export interface TemplateMapping {
   startRow: number;
-  
-  // New: Staff Info Columns (Repeated per row)
   storeName?: string;
   staffID?: string;
   staffName?: string;
-
-  // Stage 1: List Columns
   category: string;
   date: string;
   customerID: string;
@@ -43,8 +38,6 @@ export interface TemplateMapping {
   amount: string; 
   note: string;
   points: string;
-  
-  // Stage 2: Reward List Columns (New)
   reward_category?: string;
   reward_date?: string;
   reward_customerID?: string;
@@ -53,46 +46,35 @@ export interface TemplateMapping {
   reward_quantity?: string;
   reward_note?: string;
   reward_amount?: string;
-
-  // Repurchase List Columns
   originalDeveloper?: string;
   devPoints?: string;
   repurchasePoints?: string;
-  
-  // --- New Statistical Cells (Coordinates like "A1", "D5") ---
-  // Points Section
-  cell_pointsStd?: string;       // 點數標準
-  cell_pointsTotal?: string;     // 總計 (Blank)
-  cell_pointsDev?: string;       // 個人開發
-  cell_pointsTableDev?: string;  // 總表開發
-  cell_pointsRep?: string;       // 總表回購
-  cell_pointsMilkDev?: string;   // 奶粉開發 (Blank)
-
-  // Cosmetic Section
-  cell_cosmeticStd?: string;     // 美妝標準
-  cell_cosmeticTotal?: string;   // 美妝總計
-  cell_amtLrp?: string;          // 理膚
-  cell_amtCerave?: string;       // 適樂膚
-  cell_amtDrSatin?: string;      // Dr.Satin
-  cell_amtCetaphil?: string;     // 舒特膚
-  cell_amtFlora?: string;        // 芙樂思
-  cell_amtEmployee?: string;     // 員購 (Blank)
-
-  // Rewards Section
-  cell_rewardCash?: string;      // 現金獎勵
-  cell_rewardMilk?: string;      // 小兒奶粉 (Blank)
-  cell_reward711?: string;       // 7-11 禮卷
-  cell_rewardFamily?: string;    // 全家 禮卷
-  cell_rewardPx?: string;        // 全聯 禮卷
-
-  // Pharmacist Fixed Cells
-  cell_pharm_qty_1727?: string;  // 自費調劑 (001727) 數量
-  cell_pharm_qty_1345?: string;  // 調劑藥事服務費 (001345) 數量
-  cell_pharm_bonus?: string;     // 調劑獎金
+  cell_pointsStd?: string;       
+  cell_pointsTotal?: string;     
+  cell_pointsDev?: string;       
+  cell_pointsTableDev?: string;  
+  cell_pointsRep?: string;       
+  cell_pointsMilkDev?: string;   
+  cell_cosmeticStd?: string;     
+  cell_cosmeticTotal?: string;   
+  cell_amtLrp?: string;          
+  cell_amtCerave?: string;       
+  cell_amtDrSatin?: string;      
+  cell_amtCetaphil?: string;     
+  cell_amtFlora?: string;        
+  cell_amtEmployee?: string;     
+  cell_rewardCash?: string;      
+  cell_rewardMilk?: string;      
+  cell_reward711?: string;       
+  cell_rewardFamily?: string;    
+  cell_rewardPx?: string;        
+  cell_pharm_qty_1727?: string;  
+  cell_pharm_qty_1345?: string;  
+  cell_pharm_bonus?: string;     
 }
 
 export interface TemplateRecord {
-  id?: number; // 1: Sales, 2: Pharmacist, 3: Repurchase
+  id?: number; 
   name: string;
   data: ArrayBuffer;
   config?: TemplateMapping; 
@@ -105,7 +87,6 @@ export const TEMPLATE_IDS = {
   REPURCHASE: 3
 };
 
-// Use direct instantiation
 export const db = new Dexie('SalesHistoryDB') as Dexie & {
   history: Table<HistoryRecord>;
   templates: Table<TemplateRecord>;
@@ -113,23 +94,18 @@ export const db = new Dexie('SalesHistoryDB') as Dexie & {
   productGroups: Table<ProductGroup>;
 };
 
-// Update version to 5 to include productGroups table
-db.version(5).stores({
-  history: '++id, [customerID+itemID], customerID, itemID, storeName',
+// Update to version 7: Add indexes for performance optimization
+db.version(7).stores({
+  history: '++id, [customerID+itemID], customerID, itemID, storeName, date, [storeName+date]',
   templates: '++id, name, updatedAt',
   stores: '++id, &name',
   productGroups: '++id, groupName'
 });
 
-// --- Product Group Helpers (In-Memory Cache for Performance) ---
+// --- Product Group Helpers ---
 let groupCache: ProductGroup[] | null = null;
-// Maps Normalized ID -> Group Info
 let itemToGroupMap: Map<string, { group: ProductGroup, alias: string }> | null = null;
 
-/**
- * Remove leading zeros from an ID string.
- * e.g., "00123" -> "123", "123" -> "123", "00A1" -> "A1"
- */
 const normalizeID = (id: string | number): string => {
   return String(id).trim().replace(/^0+/, '');
 };
@@ -138,10 +114,8 @@ export const refreshGroupCache = async () => {
   const groups = await db.productGroups.toArray();
   groupCache = groups;
   itemToGroupMap = new Map();
-  
   groups.forEach(g => {
     g.items.forEach(item => {
-      // Key by Normalized ID to support 00123 vs 123 matching
       const normID = normalizeID(item.itemID);
       itemToGroupMap!.set(normID, { group: g, alias: item.alias });
     });
@@ -149,79 +123,42 @@ export const refreshGroupCache = async () => {
 };
 
 const ensureCache = async () => {
-  if (!groupCache) {
-    await refreshGroupCache();
-  }
+  if (!groupCache) await refreshGroupCache();
 };
 
-/**
- * Get all related Normalized ItemIDs for a given ItemID.
- * Also returns the alias map for these items (keyed by Normalized ID).
- */
 const getRelatedItemsInfo = async (itemID: string) => {
   await ensureCache();
   const normID = normalizeID(itemID);
   const entry = itemToGroupMap?.get(normID);
-  
   if (entry) {
-    // It belongs to a group, return all Normalized IDs in that group
     const relatedIDs = entry.group.items.map(i => normalizeID(i.itemID));
     const aliasMap: Record<string, string> = {};
-    entry.group.items.forEach(i => {
-        aliasMap[normalizeID(i.itemID)] = i.alias;
-    });
+    entry.group.items.forEach(i => { aliasMap[normalizeID(i.itemID)] = i.alias; });
     return { relatedIDs, aliasMap };
   }
-  
-  // No group, just return itself (normalized)
   return { relatedIDs: [normID], aliasMap: { [normID]: '' } };
 };
 
-/**
- * Check if a customer has bought an item (or its related group items) before
- */
 export const checkRepurchase = async (customerID: string, itemID: string): Promise<boolean> => {
   if (!customerID || !itemID) return false;
-  
   const { relatedIDs } = await getRelatedItemsInfo(itemID);
-
-  // We query by CustomerID first (indexed, fast)
-  // Then we filter in memory by normalizing the DB record's ItemID
   const count = await db.history
     .where('customerID').equals(customerID)
     .filter(rec => relatedIDs.includes(normalizeID(rec.itemID)))
     .count();
-    
   return count > 0;
 };
 
-/**
- * Get detailed history for a specific customer and item (AND related items in group)
- * Sorted by Date Descending (Newest first)
- */
 export const getItemHistory = async (customerID: string, itemID: string): Promise<HistoryRecord[]> => {
     if (!customerID || !itemID) return [];
-    
     const { relatedIDs, aliasMap } = await getRelatedItemsInfo(itemID);
-    
-    // Query by CustomerID
     const records = await db.history
         .where('customerID').equals(customerID)
         .filter(rec => relatedIDs.includes(normalizeID(rec.itemID)))
         .toArray();
-    
-    // Sort by Date Descending and Attach Alias
     return records
-      .map(r => ({
-          ...r,
-          // Use normalized ID to lookup alias
-          displayAlias: aliasMap[normalizeID(r.itemID)] || '' 
-      }))
-      .sort((a, b) => {
-        if (a.date < b.date) return 1;
-        if (a.date > b.date) return -1;
-        return 0;
-    });
+      .map(r => ({ ...r, displayAlias: aliasMap[normalizeID(r.itemID)] || '' }))
+      .sort((a, b) => b.date.localeCompare(a.date));
 };
 
 export const bulkAddHistory = async (records: HistoryRecord[]) => {
@@ -236,16 +173,11 @@ export const getHistoryCount = async () => {
   return await db.history.count();
 };
 
-// --- Store Management Methods ---
-
+// --- Store Management ---
 const DEFAULT_STORES = ["東勢店", "新社店", "卓蘭店", "北苗店", "巨蛋店", "後龍店", "沙鹿店", "清水店"];
-
 export const seedDefaultStores = async () => {
   const count = await db.stores.count();
-  if (count === 0) {
-    await db.stores.bulkAdd(DEFAULT_STORES.map(name => ({ name, isActive: true })));
-    console.log("Default stores seeded");
-  }
+  if (count === 0) await db.stores.bulkAdd(DEFAULT_STORES.map(name => ({ name, isActive: true })));
 };
 
 export const getStores = async (): Promise<StoreRecord[]> => {
@@ -265,155 +197,117 @@ export const deleteStore = async (id: number) => {
 };
 
 export const getHistoryStatsByStore = async (): Promise<{ storeName: string; count: number }[]> => {
-  const all = await db.history.toArray();
   const stats: Record<string, number> = {};
-  
-  for (const row of all) {
-    const name = row.storeName || '未分類 (舊資料)';
-    stats[name] = (stats[name] || 0) + 1;
+  const storeNames = await db.history.orderBy('storeName').uniqueKeys() as string[];
+  for (const name of storeNames) {
+      stats[name || '未分類'] = await db.history.where('storeName').equals(name).count();
   }
-
   return Object.entries(stats)
     .map(([storeName, count]) => ({ storeName, count }))
-    .sort((a, b) => b.count - a.count); // Sort by count desc
+    .sort((a, b) => b.count - a.count);
 };
 
-/**
- * Get unique years for a specific store
- */
 export const getAvailableYearsByStore = async (storeName: string): Promise<string[]> => {
-  let records: HistoryRecord[];
-  if (storeName === '未分類 (舊資料)') {
-    records = await db.history.filter(r => !r.storeName).toArray();
-  } else {
-    records = await db.history.where('storeName').equals(storeName).toArray();
-  }
-
   const years = new Set<string>();
-  records.forEach(r => {
-    // Assuming date format is ROC YYYMMDD e.g. 1131105 or YYYY-MM-DD
-    // If len 7 (1131105), year is substr(0,3). If 6 (990101), year is substr(0,2)
-    // We assume mostly 3 digit years (100+)
-    const d = String(r.date);
-    let y = '';
-    if (d.includes('-')) y = d.split('-')[0];
-    else if (d.length >= 7) y = d.substring(0, 3);
-    else if (d.length === 6) y = d.substring(0, 2);
-    
-    if (y) years.add(y);
-  });
+  const name = storeName === '未分類 (舊資料)' ? "" : storeName;
+
+  await db.history
+    .where('[storeName+date]')
+    .between([name, Dexie.minKey], [name, Dexie.maxKey])
+    .eachUniqueKey(key => {
+        const dateStr = String((key as any)[1]);
+        let year = '';
+        if (dateStr.includes('-')) year = dateStr.split('-')[0];
+        else if (dateStr.length >= 7) year = dateStr.substring(0, 3);
+        else if (dateStr.length === 6) year = dateStr.substring(0, 2);
+        if (year) years.add(year);
+    });
 
   return Array.from(years).sort((a, b) => b.localeCompare(a));
 };
 
-/**
- * NEW: Get months and record counts for a specific store and year
- */
 export const getMonthlyStatsByStoreAndYear = async (storeName: string, year: string): Promise<{ month: string; count: number }[]> => {
-    let records: HistoryRecord[];
-    
-    // 1. Fetch relevant records
-    if (storeName === '未分類 (舊資料)') {
-        records = await db.history.filter(r => !r.storeName).toArray();
-    } else {
-        records = await db.history.where('storeName').equals(storeName).toArray();
+    const stats: Record<string, number> = {};
+    const name = storeName === '未分類 (舊資料)' ? "" : storeName;
+
+    let start = `${year}0000`;
+    let end = `${year}9999`;
+    if (year.length === 4) {
+        start = `${year}-01-01`;
+        end = `${year}-12-31`;
     }
 
-    // 2. Filter by Year and Group by Month in Memory
-    const stats: Record<string, number> = {};
-    
-    records.forEach(r => {
-        const d = String(r.date);
-        let rYear = '';
-        let rMonth = '';
-
-        if (d.includes('-')) {
-             // YYYY-MM-DD
-             const parts = d.split('-');
-             rYear = parts[0];
-             rMonth = parts[1];
-        } else if (d.length >= 5) {
-             // ROC: 1131105 -> Y=113, M=11
-             if (d.length >= 7) {
-                 rYear = d.substring(0, 3);
-                 rMonth = d.substring(3, 5);
-             } else if (d.length === 6) {
-                 rYear = d.substring(0, 2);
-                 rMonth = d.substring(2, 4);
-             } else if (d.length === 5) {
-                  rYear = d.substring(0, 3);
-                  rMonth = d.substring(3, 5); // Just month part e.g. 11311
-             }
-        }
-
-        if (rYear === year) {
-            stats[rMonth] = (stats[rMonth] || 0) + 1;
-        }
-    });
+    await db.history
+        .where('[storeName+date]')
+        .between([name, start], [name, end])
+        .each(record => {
+            const dateStr = record.date;
+            let month = '';
+            if (dateStr.includes('-')) month = dateStr.split('-')[1];
+            else if (dateStr.length >= 5) {
+                if (dateStr.length >= 7) month = dateStr.substring(3, 5);
+                else if (dateStr.length === 6) month = dateStr.substring(2, 4);
+                else month = dateStr.substring(3, 5);
+            }
+            if (month) stats[month] = (stats[month] || 0) + 1;
+        });
 
     return Object.entries(stats)
         .map(([month, count]) => ({ month, count }))
         .sort((a, b) => b.month.localeCompare(a.month));
 };
 
-export const deleteHistoryByYear = async (storeName: string, year: string) => {
-  if (storeName === '未分類 (舊資料)') {
-    await db.history.filter(r => !r.storeName && String(r.date).startsWith(year)).delete();
-  } else {
-    await db.history.where('storeName').equals(storeName)
-      .filter(r => String(r.date).startsWith(year))
-      .delete();
-  }
+/**
+ * Fetch records for a specific month with pagination
+ */
+export const getHistoryByMonth = async (storeName: string, year: string, month: string, offset = 0, limit = 100): Promise<HistoryRecord[]> => {
+    const name = storeName === '未分類 (舊資料)' ? "" : storeName;
+    const start = year.length === 4 ? `${year}-${month}-01` : `${year}${month}00`;
+    const end = year.length === 4 ? `${year}-${month}-31` : `${year}${month}99`;
+
+    return await db.history
+        .where('[storeName+date]')
+        .between([name, start], [name, end])
+        .offset(offset)
+        .limit(limit)
+        .toArray();
 };
 
-/**
- * NEW: Delete specific month's data
- */
+export const deleteHistoryByYear = async (storeName: string, year: string) => {
+  const name = storeName === '未分類 (舊資料)' ? "" : storeName;
+  const start = year.length === 4 ? `${year}-01-01` : `${year}0000`;
+  const end = year.length === 4 ? `${year}-12-31` : `${year}9999`;
+  await db.history.where('[storeName+date]').between([name, start], [name, end]).delete();
+};
+
 export const deleteHistoryByMonth = async (storeName: string, year: string, month: string) => {
-    const targetPrefix = `${year}${month}`; // e.g., 11311
-    
-    if (storeName === '未分類 (舊資料)') {
-        await db.history.filter(r => !r.storeName && String(r.date).startsWith(targetPrefix)).delete();
-    } else {
-        await db.history.where('storeName').equals(storeName)
-            .filter(r => String(r.date).startsWith(targetPrefix))
-            .delete();
-    }
+    const name = storeName === '未分類 (舊資料)' ? "" : storeName;
+    const start = year.length === 4 ? `${year}-${month}-01` : `${year}${month}00`;
+    const end = year.length === 4 ? `${year}-${month}-31` : `${year}${month}99`;
+    await db.history.where('[storeName+date]').between([name, start], [name, end]).delete();
 };
 
 export const deleteStoreHistory = async (storeName: string) => {
-  if (storeName === '未分類 (舊資料)') {
-    await db.history.filter(node => !node.storeName).delete();
-  } else {
-    await db.history.where('storeName').equals(storeName).delete();
-  }
+  const name = storeName === '未分類 (舊資料)' ? "" : storeName;
+  await db.history.where('storeName').equals(name).delete();
 };
 
-
 // --- Template Methods ---
-
-/**
- * Save template by specific ID (1: Sales, 2: Pharm, 3: Repurchase)
- */
 export const saveTemplate = async (file: File, templateId: number = 1) => {
   const buffer = await file.arrayBuffer();
-  // Try to keep existing config if updating file
   const existing = await db.templates.get(templateId);
-  
   await db.templates.put({
     id: templateId,
     name: file.name,
     data: buffer,
-    config: existing?.config, // Preserve config
+    config: existing?.config,
     updatedAt: Date.now()
   });
 };
 
 export const saveTemplateConfig = async (config: TemplateMapping, templateId: number = 1) => {
   const existing = await db.templates.get(templateId);
-  if (existing) {
-    await db.templates.update(templateId, { config });
-  }
+  if (existing) await db.templates.update(templateId, { config });
 };
 
 export const getTemplate = async (templateId: number = 1) => {
@@ -425,7 +319,6 @@ export const deleteTemplate = async (templateId: number = 1) => {
 };
 
 // --- Product Group Methods ---
-
 export const getProductGroups = async (): Promise<ProductGroup[]> => {
   await ensureCache();
   return groupCache || [];
