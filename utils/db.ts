@@ -7,6 +7,7 @@ export interface HistoryRecord {
   customerID: string;
   itemID: string;
   date: string; // YYYY-MM-DD or ROC Year (YYYMMDD...)
+  ticketNo?: string; // New: Store Ticket Number for strict comparison
   quantity: number; 
   unit?: string; 
   price?: number; // Unit Price
@@ -139,14 +140,40 @@ const getRelatedItemsInfo = async (itemID: string) => {
   return { relatedIDs: [normID], aliasMap: { [normID]: '' } };
 };
 
-export const checkRepurchase = async (customerID: string, itemID: string): Promise<boolean> => {
+export const checkRepurchase = async (customerID: string, itemID: string, currentTicketNo?: string, currentDate?: string): Promise<boolean> => {
   if (!customerID || !itemID) return false;
+  
   const { relatedIDs } = await getRelatedItemsInfo(itemID);
-  const count = await db.history
+  
+  const candidates = await db.history
     .where('customerID').equals(customerID)
     .filter(rec => relatedIDs.includes(normalizeID(rec.itemID)))
-    .count();
-  return count > 0;
+    .toArray();
+
+  // Strict filtering to support same-month imports
+  const validRepurchases = candidates.filter(h => {
+      // 1. Exclude Self (Exact Ticket Match)
+      if (currentTicketNo && h.ticketNo === currentTicketNo) {
+          return false;
+      }
+
+      // 2. Exclude Future Transactions (in case of full month import)
+      // If we have ticket numbers, use them for precise ordering
+      if (currentTicketNo && h.ticketNo) {
+          // If history ticket is larger (later) than current, it's not a repurchase *yet*
+          if (h.ticketNo > currentTicketNo) return false;
+      } else if (currentDate && h.date) {
+          // Fallback to Date comparison if ticket missing
+          // If history date is LATER than current, ignore
+          if (h.date > currentDate) return false;
+          // If same date but we don't have tickets to compare, we assume New to be safe (or User preference)
+          // Ideally TicketNo should be present for same-month logic
+      }
+
+      return true;
+  });
+
+  return validRepurchases.length > 0;
 };
 
 export const getItemHistory = async (customerID: string, itemID: string): Promise<HistoryRecord[]> => {

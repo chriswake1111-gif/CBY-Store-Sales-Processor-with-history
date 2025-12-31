@@ -82,6 +82,9 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
     const itemName = getVal(row, COL_HEADERS.ITEM_NAME) || getVal(row, '品名') || '';
     const ticketNo = getStr(row, COL_HEADERS.TICKET_NO);
     const dateStr = ticketNo.length >= 7 ? ticketNo.substring(5, 7) : '??';
+    
+    // Extract full date for repurchase checking
+    const fullDate = String(row[COL_HEADERS.SALES_DATE] || ticketNo || '').trim();
 
     // Determine Base Category
     let category = determineCategory(row);
@@ -135,7 +138,8 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
         // Check Repurchase (Async)
         // Only check if it carries points or is specific tracking category
         if (calculatedPoints > 0 || category === '現金-小兒銷售') {
-           const isRepurchase = await checkRepurchase(cid, itemID);
+           // Pass ticketNo and fullDate for robust checking against same-month imports
+           const isRepurchase = await checkRepurchase(cid, itemID, ticketNo, fullDate);
            if (isRepurchase) {
               status = Stage1Status.REPURCHASE;
               // Apply repurchase penalty
@@ -190,6 +194,9 @@ const processStage1Pharmacist = async (rawData: RawRow[], exclusionList: Exclusi
     const ticketNo = getStr(row, COL_HEADERS.TICKET_NO);
     const dateStr = ticketNo.length >= 7 ? ticketNo.substring(5, 7) : '??';
     
+    // Extract full date for repurchase checking
+    const fullDate = String(row[COL_HEADERS.SALES_DATE] || ticketNo || '').trim();
+
     // Extract new fields
     const amount = getNum(row, COL_HEADERS.SUBTOTAL);
     const discountRatio = getStr(row, COL_HEADERS.DISCOUNT_RATIO);
@@ -249,7 +256,8 @@ const processStage1Pharmacist = async (rawData: RawRow[], exclusionList: Exclusi
     if (isReturn) {
         status = Stage1Status.RETURN;
     } else if (hasCid && category !== '調劑點數') {
-        const isRepurchase = await checkRepurchase(cid, itemID);
+        // Pass ticketNo and fullDate
+        const isRepurchase = await checkRepurchase(cid, itemID, ticketNo, fullDate);
         if (isRepurchase) {
             status = Stage1Status.REPURCHASE;
             if (calculatedPoints > 0) {

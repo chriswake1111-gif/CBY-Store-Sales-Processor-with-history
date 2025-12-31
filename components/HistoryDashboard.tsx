@@ -245,9 +245,13 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
           const itemID = String(row[COL_HEADERS.ITEM_ID] || '').trim();
 
           if (cid && itemID && cid !== 'undefined' && itemID !== 'undefined') {
+                const ticketNo = String(row[COL_HEADERS.TICKET_NO] || '').trim();
+                
                 buffer.push({
-                    customerID: cid, itemID, 
-                    date: String(row[COL_HEADERS.SALES_DATE] || row[COL_HEADERS.TICKET_NO] || '').trim(), 
+                    customerID: cid, 
+                    itemID,
+                    ticketNo: ticketNo, // Store Ticket No for strict filtering
+                    date: String(row[COL_HEADERS.SALES_DATE] || ticketNo || '').trim(), 
                     quantity: Number(row[COL_HEADERS.QUANTITY]) || 0,
                     price: Number(row[COL_HEADERS.UNIT_PRICE] || row['單價'] || 0), 
                     unit: String(row[COL_HEADERS.UNIT] || row['單位'] || '').trim(), 
