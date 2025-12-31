@@ -1,4 +1,3 @@
-
 import React, { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { ProcessedData, Stage1Status, RepurchaseOption, StaffRecord, Stage1Row } from '../types';
 import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp, Undo2, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown, RefreshCcw, Calendar } from 'lucide-react';
@@ -31,6 +30,12 @@ interface DataViewerProps {
 
 type SortKey = 'date' | 'customerID' | null;
 type SortDirection = 'asc' | 'desc';
+
+// Define interface here to ensure visibility
+interface RepurchaseRowData extends Stage1Row {
+    devPoints: number;
+    actualSellerPoints: number;
+}
 
 const DataViewer: React.FC<DataViewerProps> = ({
   sortedPeople, selectedPersons, togglePersonSelection, activePerson, setActivePerson,
@@ -250,12 +255,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
   }, [currentData, activePerson, fullProcessedData, incomingReturns]);
 
   // --- REPURCHASE SUMMARY MATRIX LOGIC ---
-  interface RepurchaseRowData extends Stage1Row {
-      devPoints: number;
-      actualSellerPoints: number;
-  }
-
-  const repurchaseMatrix = useMemo(() => {
+  const repurchaseMatrix = useMemo((): { developers: string[], dataBySeller: Record<string, RepurchaseRowData[]> } => {
       if (!fullProcessedData) return { developers: [], dataBySeller: {} };
 
       const developersSet = new Set<string>();
@@ -303,6 +303,12 @@ const DataViewer: React.FC<DataViewerProps> = ({
 
   }, [fullProcessedData]);
 
+  // Calculate count for Repurchase Tab
+  const repurchaseRowCount = useMemo(() => {
+     if (!repurchaseMatrix?.dataBySeller) return 0;
+     return Object.values(repurchaseMatrix.dataBySeller).reduce((acc, rows) => acc + rows.length, 0);
+  }, [repurchaseMatrix]);
+
 
   if (!currentData) {
     return (
@@ -338,7 +344,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
     },
     { id: 'stage2', label: getStage2Label(), count: isPharm ? '' : `${currentData.stage2.filter(r => !r.isDeleted).length}`, icon: <Pill size={12}/> },
     ...(isPharm ? [] : [{ id: 'stage3', label: '美妝金額', count: `${currentData.stage3.total.toLocaleString()}`, icon: <Package size={12}/> }]),
-    { id: 'repurchase', label: '回購總表', count: '', icon: <RefreshCcw size={12}/> }
+    { id: 'repurchase', label: '回購總表', count: repurchaseRowCount > 0 ? `${repurchaseRowCount}` : '', icon: <RefreshCcw size={12}/> }
   ];
 
   const genOpts = repurchaseOptions.filter(o => o.isEnabled && o.group === 'GENERAL');
@@ -748,8 +754,95 @@ const DataViewer: React.FC<DataViewerProps> = ({
             </div>
           </div>
         )}
+
+        {/* --- REPURCHASE MATRIX (Added) --- */}
+        {activeTab === 'repurchase' && (
+          <div className="flex flex-col h-full bg-slate-50">
+             <div className="flex-1 overflow-auto p-4">
+                 {repurchaseMatrix.developers.length === 0 ? (
+                     <div className="h-full flex flex-col items-center justify-center text-gray-400">
+                         <RefreshCcw size={48} className="mb-4 opacity-20"/>
+                         <p className="font-bold">無回購或轉出資料</p>
+                         <p className="text-xs">請在點數表中標記「回購」或設定「原開發者」</p>
+                     </div>
+                 ) : (
+                     <div className="bg-white border border-gray-300 shadow-sm overflow-x-auto">
+                        <table className="w-full text-xs text-left whitespace-nowrap border-collapse">
+                            <thead className="bg-slate-100 text-slate-700 font-bold sticky top-0 z-20 shadow-sm">
+                                <tr>
+                                    <th className="p-2 border border-slate-300 min-w-[80px] bg-slate-100 sticky left-0 z-30">銷售員</th>
+                                    <th className="p-2 border border-slate-300 min-w-[80px] bg-slate-100">日期</th>
+                                    <th className="p-2 border border-slate-300 min-w-[80px] bg-slate-100">客戶</th>
+                                    <th className="p-2 border border-slate-300 min-w-[80px] bg-slate-100">品項</th>
+                                    <th className="p-2 border border-slate-300 min-w-[150px] bg-slate-100">品名</th>
+                                    <th className="p-2 border border-slate-300 min-w-[80px] bg-slate-100">狀態</th>
+                                    <th className="p-2 border border-slate-300 min-w-[60px] text-right bg-amber-50 text-amber-800 border-b-amber-200">回購點數</th>
+                                    {repurchaseMatrix.developers.map(dev => (
+                                        <th key={dev} className="p-2 border border-slate-300 min-w-[60px] text-center bg-purple-50 text-purple-800 border-b-purple-200">
+                                            {dev}<br/><span className="text-[9px] font-normal opacity-70">開發點數</span>
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {Object.entries(repurchaseMatrix.dataBySeller).map(([seller, rows]) => {
+                                    // Calculate Section Totals
+                                    const sellerTotal = rows.reduce((acc, r) => acc + r.actualSellerPoints, 0);
+                                    const devTotals = repurchaseMatrix.developers.map(dev => 
+                                        rows.reduce((acc, r) => r.originalDeveloper === dev ? acc + r.devPoints : acc, 0)
+                                    );
+
+                                    return (
+                                        <React.Fragment key={seller}>
+                                            {/* Section Header */}
+                                            <tr className="bg-slate-50 font-bold border-t-2 border-slate-300">
+                                                <td className="p-2 border border-slate-300 sticky left-0 bg-slate-50 z-10 text-slate-800">{seller}</td>
+                                                <td colSpan={5} className="p-2 border border-slate-300 text-right text-slate-500 text-[10px] uppercase tracking-wider">Subtotal</td>
+                                                <td className="p-2 border border-slate-300 text-right text-amber-700 bg-amber-50/50">{sellerTotal}</td>
+                                                {devTotals.map((total, i) => (
+                                                    <td key={i} className={`p-2 border border-slate-300 text-center ${total !== 0 ? 'text-purple-700 bg-purple-50/50' : 'text-gray-300'}`}>
+                                                        {total !== 0 ? total : '-'}
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                            {/* Rows */}
+                                            {rows.map((row, rIdx) => {
+                                                const isReturn = row.status === Stage1Status.RETURN;
+                                                return (
+                                                    <tr key={row.id} className="hover:bg-yellow-50 bg-white">
+                                                        <td className="p-2 border border-slate-200 sticky left-0 bg-white group-hover:bg-yellow-50 z-10 text-gray-400">{seller}</td>
+                                                        <td className="p-2 border border-slate-200 font-mono">{row.date}</td>
+                                                        <td className="p-2 border border-slate-200 font-mono">{formatCID(row.customerID)}</td>
+                                                        <td className="p-2 border border-slate-200 font-mono text-[11px]">{row.itemID}</td>
+                                                        <td className="p-2 border border-slate-200 truncate max-w-[150px]" title={row.itemName}>{row.itemName}</td>
+                                                        <td className="p-2 border border-slate-200 truncate max-w-[100px] text-[10px] text-gray-500">{row.repurchaseType || row.status}</td>
+                                                        <td className={`p-2 border border-slate-200 text-right font-bold ${isReturn ? 'text-red-600' : 'text-amber-600 bg-amber-50/30'}`}>
+                                                            {row.actualSellerPoints}
+                                                        </td>
+                                                        {repurchaseMatrix.developers.map((dev, dIdx) => {
+                                                            const isTarget = row.originalDeveloper === dev;
+                                                            return (
+                                                                <td key={dIdx} className={`p-2 border border-slate-200 text-center ${isTarget ? (isReturn ? 'text-red-500 font-bold bg-red-50/30' : 'text-purple-600 font-bold bg-purple-50/30') : ''}`}>
+                                                                    {isTarget ? row.devPoints : ''}
+                                                                </td>
+                                                            );
+                                                        })}
+                                                    </tr>
+                                                );
+                                            })}
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                     </div>
+                 )}
+             </div>
+          </div>
+        )}
       </div>
     </div>
   );
 };
+
 export default DataViewer;
