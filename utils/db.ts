@@ -95,9 +95,23 @@ export const db = new Dexie('SalesHistoryDB') as Dexie & {
   productGroups: Table<ProductGroup>;
 };
 
-// Update to version 7: Add indexes for performance optimization
-db.version(7).stores({
-  history: '++id, [customerID+itemID], customerID, itemID, storeName, date, [storeName+date]',
+// --- PERSISTENCE REQUEST ---
+// Try to persist storage to prevent browser from clearing it under pressure
+if (navigator.storage && navigator.storage.persist) {
+  navigator.storage.persist().then(persistent => {
+    if (persistent) {
+      console.log("Storage persistence granted: Data will not be cleared automatically.");
+    } else {
+      console.log("Storage persistence denied: Data may be cleared by browser under storage pressure.");
+    }
+  }).catch(err => {
+      console.warn("Could not request persistence:", err);
+  });
+}
+
+// Update to version 8: Add ticketNo to index
+db.version(8).stores({
+  history: '++id, [customerID+itemID], customerID, itemID, storeName, date, [storeName+date], ticketNo',
   templates: '++id, name, updatedAt',
   stores: '++id, &name',
   productGroups: '++id, groupName'

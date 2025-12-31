@@ -307,7 +307,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
   // Calculate count for Repurchase Tab
   const repurchaseRowCount = useMemo(() => {
      if (!repurchaseMatrix?.dataBySeller) return 0;
-     return Object.values(repurchaseMatrix.dataBySeller).reduce((acc, rows: RepurchaseRowData[]) => acc + rows.length, 0);
+     return Object.values(repurchaseMatrix.dataBySeller).reduce((acc: number, rows: RepurchaseRowData[]) => acc + rows.length, 0);
   }, [repurchaseMatrix]);
 
 
