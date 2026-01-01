@@ -5,7 +5,8 @@ import {
   PieChart, RefreshCw, Trash2, Plus, Save, Edit2, X, FolderOpen, 
   Calendar, ChevronRight, ChevronDown, FileText, CheckCircle2, 
   AlertTriangle, Search, Play, List, FileSpreadsheet, StopCircle, 
-  Table as TableIcon, ArrowDownCircle, Download, ArchiveRestore
+  Table as TableIcon, ArrowDownCircle, Download, ArchiveRestore,
+  Settings
 } from 'lucide-react';
 import { 
   getHistoryCount, clearHistory, bulkAddHistory, HistoryRecord, 
@@ -378,7 +379,7 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
             </div>
             <div className="flex-1 p-4 space-y-2 overflow-y-auto">
                 <SidebarItem view="OVERVIEW" label="總覽儀表板" icon={LayoutDashboard} />
-                <SidebarItem view="EXPLORER" label="資料瀏覽與管理" icon={FolderOpen} />
+                <SidebarItem view="EXPLORER" label="資料瀏覽器" icon={FolderOpen} />
                 <SidebarItem view="IMPORT" label="排程匯入工具" icon={Upload} />
                 <SidebarItem view="STORES" label="分店設定" icon={Store} />
             </div>
@@ -407,6 +408,130 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
                          </div>
                     )}
                 </div>
+
+                {/* --- OVERVIEW --- */}
+                {activeView === 'OVERVIEW' && (
+                    <div className="space-y-6">
+                        {/* Stats Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center gap-4 hover:shadow-md transition-shadow">
+                                <div className="p-4 bg-blue-50 text-blue-600 rounded-full">
+                                    <HardDrive size={24} />
+                                </div>
+                                <div>
+                                    <div className="text-sm text-slate-500 font-bold uppercase tracking-wider">歷史資料總筆數</div>
+                                    <div className="text-3xl font-black text-slate-800 font-mono">{totalRecords.toLocaleString()}</div>
+                                </div>
+                            </div>
+                            
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center gap-4 hover:shadow-md transition-shadow">
+                                <div className="p-4 bg-emerald-50 text-emerald-600 rounded-full">
+                                    <Store size={24} />
+                                </div>
+                                <div>
+                                    <div className="text-sm text-slate-500 font-bold uppercase tracking-wider">建檔分店數</div>
+                                    <div className="text-3xl font-black text-slate-800 font-mono">{availableStores.length}</div>
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center gap-4 hover:shadow-md transition-shadow">
+                                <div className="p-4 bg-purple-50 text-purple-600 rounded-full">
+                                    <Database size={24} />
+                                </div>
+                                <div>
+                                    <div className="text-sm text-slate-500 font-bold uppercase tracking-wider">系統狀態</div>
+                                    <div className="text-sm font-bold text-slate-700 mt-1">
+                                         <div className="flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 運作正常
+                                         </div>
+                                    </div>
+                                     <div className="text-xs text-slate-400 mt-0.5">IndexedDB Ready</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* Store Distribution */}
+                            <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                                        <PieChart size={20} className="text-blue-500"/> 資料分佈概況
+                                    </h3>
+                                    <div className="text-xs text-slate-400 font-mono">Top {Math.min(storeStats.length, 10)} Stores</div>
+                                </div>
+                                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                                    {storeStats.length === 0 ? (
+                                        <div className="text-center text-gray-400 py-10 flex flex-col items-center">
+                                            <Database size={48} className="mb-2 opacity-20"/>
+                                            <span>尚無資料</span>
+                                            <button onClick={() => setActiveView('IMPORT')} className="mt-4 text-blue-600 text-sm font-bold hover:underline">前往匯入資料</button>
+                                        </div>
+                                    ) : (
+                                        storeStats.map((stat, idx) => {
+                                            const percent = totalRecords > 0 ? (stat.count / totalRecords) * 100 : 0;
+                                            return (
+                                                <div key={stat.storeName} className="space-y-1">
+                                                    <div className="flex justify-between text-sm font-bold text-slate-700">
+                                                        <span>{idx + 1}. {stat.storeName}</span>
+                                                        <span className="font-mono text-slate-500">{stat.count.toLocaleString()} <span className="text-xs text-slate-400 ml-1">({percent.toFixed(1)}%)</span></span>
+                                                    </div>
+                                                    <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                                                        <div 
+                                                            className="h-full bg-blue-500 rounded-full transition-all duration-1000 ease-out shadow-sm" 
+                                                            style={{ width: `${percent}%`, opacity: Math.max(0.4, percent/100 + 0.2) }}
+                                                        ></div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Quick Actions & Tips */}
+                            <div className="space-y-6">
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                    <h3 className="text-sm font-black text-slate-800 mb-4 uppercase tracking-wider flex items-center gap-2">
+                                        <Settings size={16} className="text-slate-400"/> 快速操作
+                                    </h3>
+                                    <div className="space-y-3">
+                                        <button onClick={() => setActiveView('IMPORT')} className="w-full py-3 px-4 bg-blue-50 text-blue-700 font-bold rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors flex items-center justify-between group">
+                                            <span className="flex items-center gap-2"><Upload size={18}/> 匯入資料</span>
+                                            <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-opacity"/>
+                                        </button>
+                                        <button onClick={handleBackup} disabled={isProcessing} className="w-full py-3 px-4 bg-emerald-50 text-emerald-700 font-bold rounded-lg border border-emerald-100 hover:bg-emerald-100 transition-colors flex items-center justify-between group">
+                                            <span className="flex items-center gap-2"><Download size={18}/> 備份資料庫 (JSON)</span>
+                                            <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-opacity"/>
+                                        </button>
+                                        <button onClick={handleRestoreClick} disabled={isProcessing} className="w-full py-3 px-4 bg-amber-50 text-amber-700 font-bold rounded-lg border border-amber-100 hover:bg-amber-100 transition-colors flex items-center justify-between group">
+                                            <span className="flex items-center gap-2"><ArchiveRestore size={18}/> 還原資料庫</span>
+                                            <ChevronRight size={16} className="opacity-0 group-hover:opacity-100 transition-opacity"/>
+                                        </button>
+                                        <input type="file" ref={backupInputRef} onChange={handleRestoreFile} className="hidden" accept=".json" />
+                                        
+                                        {totalRecords > 0 && (
+                                            <button onClick={handleClearAll} className="w-full py-3 px-4 bg-red-50 text-red-600 font-bold rounded-lg border border-red-100 hover:bg-red-100 transition-colors flex items-center justify-between group mt-4">
+                                                <span className="flex items-center gap-2"><Trash2 size={18}/> 清空所有資料</span>
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="bg-blue-50 border border-blue-100 rounded-xl p-5">
+                                    <h4 className="text-blue-800 font-bold flex items-center gap-2 mb-2 text-sm"><AlertTriangle size={16}/> 效能與維護提示</h4>
+                                    <div className="text-xs text-blue-700 leading-relaxed space-y-2">
+                                        <p>本系統使用高效能資料庫 (IndexedDB)，可承載數十萬筆以上的歷史資料。</p>
+                                        <ul className="list-disc pl-4 space-y-1 opacity-80">
+                                            <li>建議定期備份資料庫 (.json 檔) 以防遺失。</li>
+                                            <li>若單一分店資料超過 5 年以上，可至「資料瀏覽器」移除過舊年份。</li>
+                                            <li>備份大於 50萬筆資料時可能會耗時較久，請耐心等候。</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* --- EXPLORER --- */}
                 {activeView === 'EXPLORER' && (
@@ -438,6 +563,9 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
                                             </div>
                                             {expandedYear === year && (
                                                 <div className="bg-white px-4 pb-2 space-y-1">
+                                                    <div className="flex justify-end mb-1">
+                                                        <button onClick={() => handleDeleteYearData(selectedStore, year)} className="text-[10px] text-red-400 hover:text-red-600 hover:underline px-1">刪除整年</button>
+                                                    </div>
                                                     {monthlyStats.map(m => (
                                                         <button key={m.month} onClick={() => loadRecords(m.month)} className={`w-full flex justify-between items-center p-2 rounded text-xs transition-colors ${selectedMonth === m.month ? 'bg-blue-50 text-blue-700 font-bold border border-blue-200' : 'text-slate-600 hover:bg-slate-50'}`}>
                                                             <span>{m.month}月</span>

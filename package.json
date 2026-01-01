@@ -1,12 +1,20 @@
+
 {
   "name": "store-sales-processor",
   "private": true,
-  "version": "0.9.6",
+  "version": "1.1.0",
   "type": "module",
+  "main": "electron/main.js",
+  "author": {
+    "name": "CBY Head Office"
+  },
+  "description": "Store Sales Bonus Calculator & History Manager",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "npm run build && electron-builder"
   },
   "dependencies": {
     "lucide-react": "^0.344.0",
@@ -23,6 +31,31 @@
     "@types/uuid": "^9.0.8",
     "@vitejs/plugin-react": "^4.2.1",
     "typescript": "^5.2.2",
-    "vite": "^5.1.6"
+    "vite": "^5.1.6",
+    "electron": "^29.1.0",
+    "electron-builder": "^24.13.3",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.cby.salesprocessor",
+    "productName": "分店獎金計算系統",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "public/vite.svg" 
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
   }
 }
