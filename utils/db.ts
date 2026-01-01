@@ -380,14 +380,56 @@ export const deleteProductGroup = async (id: number) => {
   await refreshGroupCache();
 };
 
-// --- DATABASE BACKUP / RESTORE ---
+// --- DATABASE BACKUP / RESTORE (OPTIMIZED FOR LARGE DATASETS) ---
 
-export const exportDatabaseToJson = async (): Promise<string> => {
-    // We only export essential tables: history, stores, productGroups
-    // Templates are heavy (ArrayBuffer) and optional, we can include them if needed but might bloat the JSON.
-    // Let's include everything to be safe.
+export const exportDatabaseToJson = async (): Promise<Blob> => {
+    // Optimization for 7M+ records:
+    // Instead of creating one giant string (which crashes V8 RAM limit ~2GB),
+    // We construct a Blob from an array of chunked strings.
     
-    // We need to convert ArrayBuffers in templates to Base64 for JSON storage
+    const chunks: string[] = [];
+    
+    // Header
+    chunks.push('{"version":1,"timestamp":' + Date.now() + ',"tables":{');
+    
+    // 1. Export History (The Big One)
+    chunks.push('"history":[');
+    let count = 0;
+    
+    // Use Dexie's each() to stream records one by one
+    // We collect them in a small buffer to reduce IO/String calls slightly, but keep memory low.
+    const BATCH_SIZE = 1000;
+    let buffer: string[] = [];
+    
+    await db.history.each(record => {
+        // Manually stringify to ensure control
+        buffer.push(JSON.stringify(record));
+        count++;
+        
+        if (buffer.length >= BATCH_SIZE) {
+            if (count > BATCH_SIZE) chunks.push(','); // Add comma before this batch if not first
+            chunks.push(buffer.join(','));
+            buffer = [];
+        }
+    });
+    
+    // Flush remaining buffer
+    if (buffer.length > 0) {
+        if (count > buffer.length) chunks.push(',');
+        chunks.push(buffer.join(','));
+    }
+    chunks.push('],'); // End history array
+
+    // 2. Export Stores (Small)
+    const stores = await db.stores.toArray();
+    chunks.push('"stores":' + JSON.stringify(stores) + ',');
+
+    // 3. Export Groups (Small)
+    const productGroups = await db.productGroups.toArray();
+    chunks.push('"productGroups":' + JSON.stringify(productGroups) + ',');
+
+    // 4. Export Templates (Medium - contains Base64 strings)
+    const templatesRaw = await db.templates.toArray();
     const bufferToBase64 = (buffer: ArrayBuffer) => {
         let binary = '';
         const bytes = new Uint8Array(buffer);
@@ -397,33 +439,26 @@ export const exportDatabaseToJson = async (): Promise<string> => {
         }
         return window.btoa(binary);
     };
-
-    const history = await db.history.toArray();
-    const stores = await db.stores.toArray();
-    const productGroups = await db.productGroups.toArray();
-    const templatesRaw = await db.templates.toArray();
-    
     const templates = templatesRaw.map(t => ({
         ...t,
-        data: bufferToBase64(t.data) // Convert to string
+        data: bufferToBase64(t.data)
     }));
+    chunks.push('"templates":' + JSON.stringify(templates));
 
-    const exportData = {
-        version: 1,
-        timestamp: Date.now(),
-        tables: {
-            history,
-            stores,
-            productGroups,
-            templates
-        }
-    };
+    // Footer
+    chunks.push('}}'); // End tables object, End root object
 
-    return JSON.stringify(exportData);
+    // Create Blob directly from chunks
+    return new Blob(chunks, { type: "application/json" });
 };
 
 export const importDatabaseFromJson = async (jsonString: string): Promise<number> => {
     try {
+        // Note: For 7M records, `JSON.parse(jsonString)` might still fail if the string itself 
+        // was loaded into memory. However, reading a file via FileReader as Text is usually the bottleneck.
+        // If import fails on large files, we'd need a streaming JSON parser (not included in standard libs).
+        // For now, we assume the user has enough RAM to parse the string if they managed to read it.
+        
         const data = JSON.parse(jsonString);
         if (!data.tables) throw new Error("無效的備份檔案格式");
 
@@ -471,9 +506,9 @@ export const importDatabaseFromJson = async (jsonString: string): Promise<number
         });
         
         await refreshGroupCache(); // Refresh memory cache
-        return data.tables.history.length;
+        return data.tables.history ? data.tables.history.length : 0;
     } catch (e) {
         console.error(e);
-        throw new Error("還原失敗，檔案可能損毀或格式不符");
+        throw new Error("還原失敗，檔案可能損毀或記憶體不足 (請嘗試分割檔案)");
     }
 };

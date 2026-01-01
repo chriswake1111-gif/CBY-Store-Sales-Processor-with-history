@@ -193,8 +193,8 @@ const HistoryDashboard: React.FC<HistoryDashboardProps> = ({ onBack }) => {
   const handleBackup = async () => {
       setIsProcessing(true);
       try {
-          const json = await exportDatabaseToJson();
-          const blob = new Blob([json], { type: "application/json" });
+          // Now returns Blob directly to support large datasets (7M+ rows)
+          const blob = await exportDatabaseToJson();
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = url;
