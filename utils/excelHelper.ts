@@ -411,7 +411,7 @@ export const exportToExcel = async (
             };
 
             if (data.stage2.length > 0) {
-                 addSimpleRow(["--- 第二階段：獎勵/調劑 ---"]);
+                 addSimpleRow(["--- 現金獎勵清單 ---"]);
                  
                  data.stage2.forEach(r => {
                      if (r.isDeleted) return;
