@@ -4,18 +4,18 @@ import { RawRow, ExclusionItem, RewardRule, ProcessedData, Stage1Status, StaffRo
 import { readExcelFile, exportToExcel } from './utils/excelHelper';
 import { processStage1, processStage2, processStage3, recalculateStage1Points, generateEmptyStage3Rows, determineCategory, sortStage1 } from './utils/processor';
 import { saveToLocal, loadFromLocal, checkSavedData } from './utils/storage';
-import { seedDefaultStores } from './utils/db'; 
+import { seedDefaultStores, preloadHistoryForCustomers } from './utils/db'; 
 import FileUploader from './components/FileUploader';
 import PopoutWindow from './components/PopoutWindow';
 import DataViewer from './components/DataViewer';
 import StaffClassificationModal from './components/StaffClassificationModal';
 import HelpModal from './components/HelpModal';
-import HistoryDashboard from './components/HistoryDashboard'; // Updated Import
+import HistoryDashboard from './components/HistoryDashboard';
 import ExportSettingsModal from './components/ExportSettingsModal';
 import RepurchaseSettingsModal from './components/RepurchaseSettingsModal'; 
 import StaffManagerModal from './components/StaffManagerModal'; 
 import ProductGroupModal from './components/ProductGroupModal';
-import { Download, Maximize2, AlertCircle, RefreshCcw, Save, FolderOpen, Activity, FileSpreadsheet, HelpCircle, Database, Loader2, Settings, Users, ClipboardList, Layers } from 'lucide-react';
+import { Download, Maximize2, AlertCircle, RefreshCcw, Save, FolderOpen, Activity, FileSpreadsheet, HelpCircle, Database, Loader2, Settings, Users, ClipboardList, Layers, ChevronUp, ChevronDown } from 'lucide-react';
 import { COL_HEADERS } from './constants';
 
 const DEFAULT_REPURCHASE_OPTIONS: RepurchaseOption[] = [
@@ -76,6 +76,9 @@ const App: React.FC = () => {
   const [lastSaveTime, setLastSaveTime] = useState<number | null>(null);
   const [hasSavedData, setHasSavedData] = useState<boolean>(false);
   
+  // UI State
+  const [isImportCollapsed, setIsImportCollapsed] = useState(false);
+  
   const stateRef = useRef({ exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList, reportDate });
 
   useEffect(() => {
@@ -92,6 +95,15 @@ const App: React.FC = () => {
   useEffect(() => {
     stateRef.current = { exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList, reportDate };
   }, [exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList, reportDate]);
+
+  // Auto-collapse logic when data is loaded
+  useEffect(() => {
+    if (rawSalesData.length > 0) {
+        setIsImportCollapsed(true);
+    } else {
+        setIsImportCollapsed(false);
+    }
+  }, [rawSalesData]);
 
   const handleForceRefresh = () => {
     if (window.confirm("確定要強制刷新程式嗎？這會清除瀏覽器快取並重新載入，未儲存的進度將會遺失。")) {
@@ -170,11 +182,9 @@ const App: React.FC = () => {
       // --- Extract Date Logic ---
       let extractedDate = '';
       if (json.length > 0) {
-          // Find first row with a Ticket No ('單號')
           const firstRow = json.find(r => r[COL_HEADERS.TICKET_NO] || r['單號']);
           if (firstRow) {
               const ticket = String(firstRow[COL_HEADERS.TICKET_NO] || firstRow['單號']).trim();
-              // Expecting format like 113110001 (YYYMM...)
               if (ticket.length >= 5) {
                   const yy = ticket.substring(0, 3);
                   const mm = ticket.substring(3, 5);
@@ -183,7 +193,6 @@ const App: React.FC = () => {
           }
       }
       setReportDate(extractedDate);
-      // ---------------------------
 
       const people = new Set<string>();
       json.forEach((row: any) => {
@@ -210,11 +219,26 @@ const App: React.FC = () => {
     setIsClassifying(false); setIsProcessing(true);
     const finalRoles = { ...staffRoles, ...updatedRoles };
     setStaffRoles(finalRoles);
+
+    // Use setTimeout to allow UI to render the loading state
     setTimeout(async () => {
         try {
+          // --- BATCH HISTORY PRE-LOADING START ---
+          // Extract all Customer IDs to fetch history efficiently in one go
+          const allCustomerIDs: string[] = [];
+          pendingRawData.forEach(row => {
+              const cid = row[COL_HEADERS.CUSTOMER_ID];
+              if (cid && cid !== 'undefined') allCustomerIDs.push(String(cid));
+          });
+          
+          // Build Cache
+          const historyCache = await preloadHistoryForCustomers(allCustomerIDs);
+          // --- BATCH HISTORY PRE-LOADING END ---
+
           const grouped: ProcessedData = {};
           const peopleSet = new Set(Object.keys(finalRoles)); 
           const rowsByPerson: Record<string, RawRow[]> = {};
+          
           pendingRawData.forEach(row => {
             const p = String(row[COL_HEADERS.SALES_PERSON] || '');
             if (p && peopleSet.has(p)) {
@@ -222,12 +246,17 @@ const App: React.FC = () => {
               rowsByPerson[p].push(row);
             }
           });
+
           for (const person of Object.keys(rowsByPerson)) {
             const role = finalRoles[person] || 'SALES';
             if (role === 'NO_BONUS') continue;
+            
             const personRows = rowsByPerson[person];
-            const pStage1 = await processStage1(personRows, exclusionList, role);
+            
+            // Pass the pre-loaded cache to the processor
+            const pStage1 = await processStage1(personRows, exclusionList, role, historyCache);
             const pStage2 = processStage2(personRows, rewardRules, role);
+            
             let pStage3: Stage3Summary;
             if (role === 'PHARMACIST') pStage3 = { salesPerson: person, rows: [], total: 0 };
             else {
@@ -236,15 +265,29 @@ const App: React.FC = () => {
             }
             grouped[person] = { role, stage1: pStage1, stage2: pStage2, stage3: pStage3 };
           }
+          
           setRawSalesData(pendingRawData); setProcessedData(grouped);
           setSelectedPersons(new Set(Object.keys(grouped)));
+          
+          // Initial selection sort
           const sortedKeys = Object.keys(grouped).sort((a, b) => {
             const roleA = grouped[a].role; const roleB = grouped[b].role;
             const pA = roleA === 'SALES' ? 1 : (roleA === 'PHARMACIST' ? 2 : 3);
             const pB = roleB === 'SALES' ? 1 : (roleB === 'PHARMACIST' ? 2 : 3);
+            
             if (pA !== pB) return pA - pB;
+            
+            // Secondary Sort: Employee ID
+            const staffA = staffMasterList.find(s => s.name === a);
+            const staffB = staffMasterList.find(s => s.name === b);
+            const idA = staffA?.id || '999999';
+            const idB = staffB?.id || '999999';
+            
+            if (idA !== idB) return idA.localeCompare(idB, undefined, { numeric: true });
+            
             return a.localeCompare(b, 'zh-TW');
           });
+          
           if (sortedKeys.length > 0) setActivePerson(sortedKeys[0]);
           setPendingRawData(null);
         } catch (e) { setErrorMsg("處理失敗: " + e); setPendingRawData(null); } finally { setIsProcessing(false); }
@@ -284,29 +327,15 @@ const App: React.FC = () => {
         const updatedStage1 = data.stage1.map(row => {
            if (row.id !== id) return row;
            const updated = { ...row, [field]: val };
-           
-           // Special Logic: Switching Category based on Return Target presence
            if (field === 'returnTarget') {
-              if (val) {
-                  // If target is selected, force category to '退換貨' so it sorts to bottom
-                  updated.category = '退換貨';
-              } else {
-                  // If target is cleared, revert to natural category so it sorts back to its group
-                  updated.category = determineCategory(row.raw);
-              }
+              if (val) updated.category = '退換貨';
+              else updated.category = determineCategory(row.raw);
            }
-           
            updated.calculatedPoints = recalculateStage1Points(updated, data.role);
            return updated;
         });
-
-        // Re-sort the list immediately so rows jump to correct position
         const reSorted = sortStage1(updatedStage1);
-        
-        return {
-           ...data,
-           stage1: reSorted
-        };
+        return { ...data, stage1: reSorted };
       });
   };
 
@@ -328,13 +357,24 @@ const App: React.FC = () => {
 
   const sortedPeople = useMemo(() => {
     return Object.keys(processedData).sort((a, b) => {
+       // 1. Sort by Role: Sales < Pharmacist < Others
        const roleA = processedData[a].role; const roleB = processedData[b].role;
        const pA = roleA === 'SALES' ? 1 : (roleA === 'PHARMACIST' ? 2 : 3);
        const pB = roleB === 'SALES' ? 1 : (roleB === 'PHARMACIST' ? 2 : 3);
        if (pA !== pB) return pA - pB;
+       
+       // 2. Sort by ID (from Staff Master List)
+       const staffA = staffMasterList.find(s => s.name === a);
+       const staffB = staffMasterList.find(s => s.name === b);
+       const idA = staffA?.id || '999999'; // Push no-ID to end
+       const idB = staffB?.id || '999999';
+       
+       if (idA !== idB) return idA.localeCompare(idB, undefined, { numeric: true });
+
+       // 3. Fallback to Name
        return a.localeCompare(b, 'zh-TW');
     });
-  }, [processedData]);
+  }, [processedData, staffMasterList]);
 
   const allActiveStaff = useMemo(() => {
      return Object.keys(processedData).filter(p => processedData[p].role !== 'NO_BONUS').sort();
@@ -377,7 +417,8 @@ const App: React.FC = () => {
     handleStatusChangeStage1, handleToggleDeleteStage2, handleUpdateStage2CustomReward, onClose: isPopOut ? () => setIsPopOut(false) : undefined,
     handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord: activeStaffRecord,
     fullProcessedData: processedData,
-    reportDate // Pass date to DataViewer
+    reportDate,
+    staffMasterList 
   };
   
   const classificationNames = useMemo(() => {
@@ -387,12 +428,10 @@ const App: React.FC = () => {
     return Array.from(s).sort();
   }, [pendingRawData]);
 
-  // --- RENDER HISTORY DASHBOARD ---
   if (viewMode === 'HISTORY') {
       return <HistoryDashboard onBack={() => setViewMode('CALCULATOR')} />;
   }
 
-  // --- RENDER CALCULATOR ---
   return (
     <>
       <div className="flex flex-col h-screen bg-slate-100 font-sans text-slate-900">
@@ -406,7 +445,6 @@ const App: React.FC = () => {
                     <button onClick={() => setShowHelp(true)} className="text-slate-400 hover:text-white transition-colors" title="使用說明">
                       <HelpCircle size={18} />
                     </button>
-                    {/* Switch to History Mode */}
                     <button onClick={() => setViewMode('HISTORY')} className="text-blue-300 hover:text-white transition-colors" title="歷史資料庫管理中心">
                       <Database size={18} />
                     </button>
@@ -416,7 +454,7 @@ const App: React.FC = () => {
                   </div>
                 </h1>
                 <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.1.0</span>
+                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.2.0 (High Perf)</span>
                     {lastSaveTime && <span className="flex items-center gap-1 border-l border-slate-700 pl-2"><Save size={10}/> {new Date(lastSaveTime).toLocaleTimeString()}</span>}
                 </div>
              </div>
@@ -446,11 +484,33 @@ const App: React.FC = () => {
              <button onClick={handleExportClick} disabled={!Object.keys(processedData).length} className="flex items-center gap-2 px-4 py-1.5 text-xs bg-blue-700 text-white border border-blue-600 hover:bg-blue-600 hover:border-blue-500 rounded-sm disabled:bg-slate-800 transition-colors font-bold shadow-sm"><Download size={14} /> 匯出報表</button>
           </div>
         </div>
-        <div className="px-4 py-3 grid grid-cols-1 md:grid-cols-3 gap-3 shrink-0 w-full border-b border-gray-200 bg-white">
-            <FileUploader label="1. 藥師點數清單" onFileSelect={handleImportExclusion} isLoaded={exclusionList.length > 0} icon="list" disabled={isProcessing} />
-            <FileUploader label="2. 現金獎勵表" onFileSelect={handleImportRewards} isLoaded={rewardRules.length > 0} icon="dollar" disabled={isProcessing} />
-            <FileUploader label="3. 銷售報表" onFileSelect={handleImportSales} disabled={!exclusionList.length || !rewardRules.length || isProcessing} isLoaded={rawSalesData.length > 0} icon="file" />
+        
+        {/* Collapsible Import Section */}
+        <div className={`border-b border-gray-200 bg-white transition-all duration-300 shrink-0 w-full ${isImportCollapsed ? 'py-1 px-4' : 'py-3 px-4'}`}>
+            <div className="flex items-center gap-3">
+                {isImportCollapsed ? (
+                    <div 
+                        className="flex-1 h-2 bg-emerald-500 rounded-full cursor-pointer hover:bg-emerald-400 transition-colors shadow-sm"
+                        onClick={() => setIsImportCollapsed(false)}
+                        title="資料已匯入完成，點擊展開詳細設定"
+                    />
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 flex-1 animate-in fade-in slide-in-from-top-2 duration-300">
+                        <FileUploader label="1. 藥師點數清單" onFileSelect={handleImportExclusion} isLoaded={exclusionList.length > 0} icon="list" disabled={isProcessing} />
+                        <FileUploader label="2. 現金獎勵表" onFileSelect={handleImportRewards} isLoaded={rewardRules.length > 0} icon="dollar" disabled={isProcessing} />
+                        <FileUploader label="3. 銷售報表" onFileSelect={handleImportSales} disabled={!exclusionList.length || !rewardRules.length || isProcessing} isLoaded={rawSalesData.length > 0} icon="file" />
+                    </div>
+                )}
+                <button 
+                    onClick={() => setIsImportCollapsed(!isImportCollapsed)} 
+                    className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors self-center shrink-0"
+                    title={isImportCollapsed ? "展開" : "收折"}
+                >
+                    {isImportCollapsed ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
+                </button>
+            </div>
         </div>
+
         {errorMsg && (
             <div className="mx-4 mt-2 p-2 bg-red-100 border border-red-300 text-red-800 flex items-center gap-2 text-sm font-bold">
                 <AlertCircle size={16} /> <span>{errorMsg}</span>
@@ -460,6 +520,7 @@ const App: React.FC = () => {
            <div className="flex-1 flex flex-col items-center justify-center text-blue-600 bg-white">
                <Loader2 size={48} className="animate-spin mb-4" />
                <p className="text-lg font-bold">正在比對歷史資料...</p>
+               <p className="text-sm text-gray-400 mt-2">大型資料庫優化處理中</p>
            </div>
         ) : sortedPeople.length > 0 ? (
            <div className="flex-1 overflow-hidden p-4">

@@ -25,6 +25,15 @@ export interface HistoryRecord {
   displayAlias?: string; 
 }
 
+// Lite version for memory caching
+export interface HistoryLite {
+  itemID: string;
+  normItemID: string;
+  ticketNo?: string;
+  date: string;
+  relatedIDs: string[]; // Pre-computed related IDs based on group
+}
+
 export interface TemplateMapping {
   startRow: number;
   storeName?: string;
@@ -72,6 +81,9 @@ export interface TemplateMapping {
   cell_pharm_qty_1727?: string;  
   cell_pharm_qty_1345?: string;  
   cell_pharm_bonus?: string;     
+  cell_pharm_points_dev?: string;       // New: Pharmacist Personal Points
+  cell_pharm_points_table_dev?: string; // New: Pharmacist Table Dev
+  cell_pharm_points_rep?: string;       // New: Pharmacist Table Rep
 }
 
 export interface TemplateRecord {
@@ -96,13 +108,12 @@ export const db = new Dexie('SalesHistoryDB') as Dexie & {
 };
 
 // --- PERSISTENCE REQUEST ---
-// Try to persist storage to prevent browser from clearing it under pressure
 if (navigator.storage && navigator.storage.persist) {
   navigator.storage.persist().then(persistent => {
     if (persistent) {
-      console.log("Storage persistence granted: Data will not be cleared automatically.");
+      console.log("Storage persistence granted.");
     } else {
-      console.log("Storage persistence denied: Data may be cleared by browser under storage pressure.");
+      console.log("Storage persistence denied.");
     }
   }).catch(err => {
       console.warn("Could not request persistence:", err);
@@ -154,9 +165,101 @@ const getRelatedItemsInfo = async (itemID: string) => {
   return { relatedIDs: [normID], aliasMap: { [normID]: '' } };
 };
 
+// --- BATCH OPTIMIZATION: Preload History ---
+// Instead of querying DB for every single row (which causes 1000+ DB calls),
+// we fetch all history for the relevant customers once and process in memory.
+
+export type HistoryCache = Map<string, HistoryLite[]>;
+
+export const preloadHistoryForCustomers = async (customerIDs: string[]): Promise<HistoryCache> => {
+    // 1. Ensure Group Cache is ready
+    await ensureCache();
+
+    const uniqueCIDs = Array.from(new Set(customerIDs)).filter(c => c && c !== 'undefined');
+    const cache = new Map<string, HistoryLite[]>();
+    
+    // 2. Batch Query (Chunking to avoid query limit)
+    const chunkSize = 200;
+    for (let i = 0; i < uniqueCIDs.length; i += chunkSize) {
+        const chunk = uniqueCIDs.slice(i, i + chunkSize);
+        const records = await db.history.where('customerID').anyOf(chunk).toArray();
+        
+        for (const r of records) {
+            if (!cache.has(r.customerID)) cache.set(r.customerID, []);
+            
+            // Pre-calculate related IDs for this history record to avoid repeated lookups
+            const normID = normalizeID(r.itemID);
+            let relatedIDs = [normID];
+            
+            // If this history item is part of a group, expand it
+            const groupEntry = itemToGroupMap?.get(normID);
+            if (groupEntry) {
+                relatedIDs = groupEntry.group.items.map(item => normalizeID(item.itemID));
+            }
+
+            cache.get(r.customerID)!.push({
+                itemID: r.itemID,
+                normItemID: normID,
+                ticketNo: r.ticketNo,
+                date: r.date,
+                relatedIDs
+            });
+        }
+    }
+    return cache;
+};
+
+// Optimized Synchronous Check using Cache
+export const checkRepurchaseSync = (
+    cache: HistoryCache, 
+    customerID: string, 
+    itemID: string, 
+    currentTicketNo?: string, 
+    currentDate?: string
+): boolean => {
+    const history = cache.get(customerID);
+    if (!history || history.length === 0) return false;
+
+    const currentNormID = normalizeID(itemID);
+    
+    // Find if current item belongs to a group
+    let targetRelatedIDs = [currentNormID];
+    const groupEntry = itemToGroupMap?.get(currentNormID);
+    if (groupEntry) {
+        targetRelatedIDs = groupEntry.group.items.map(i => normalizeID(i.itemID));
+    }
+
+    // Check against history
+    for (const h of history) {
+        // 1. Check Intersection of Product Groups
+        // If the history item's group (h.relatedIDs) contains the current item (currentNormID),
+        // OR current item's group (targetRelatedIDs) contains the history item (h.normItemID).
+        // Since we pre-calc relatedIDs, simple inclusion check is enough.
+        
+        const isMatch = h.relatedIDs.includes(currentNormID);
+        
+        if (isMatch) {
+             // 2. Strict Filtering (Same as async version)
+             
+             // Exclude Self (Same Ticket)
+             if (currentTicketNo && h.ticketNo === currentTicketNo) continue;
+             
+             // Exclude Future (if TicketNo exists)
+             if (currentTicketNo && h.ticketNo && h.ticketNo > currentTicketNo) continue;
+             
+             // Fallback Date Check
+             if ((!currentTicketNo || !h.ticketNo) && currentDate && h.date > currentDate) continue;
+
+             return true; // Found valid repurchase
+        }
+    }
+
+    return false;
+};
+
+// Legacy Async Check (Single use)
 export const checkRepurchase = async (customerID: string, itemID: string, currentTicketNo?: string, currentDate?: string): Promise<boolean> => {
   if (!customerID || !itemID) return false;
-  
   const { relatedIDs } = await getRelatedItemsInfo(itemID);
   
   const candidates = await db.history
@@ -164,26 +267,13 @@ export const checkRepurchase = async (customerID: string, itemID: string, curren
     .filter(rec => relatedIDs.includes(normalizeID(rec.itemID)))
     .toArray();
 
-  // Strict filtering to support same-month imports
   const validRepurchases = candidates.filter(h => {
-      // 1. Exclude Self (Exact Ticket Match)
-      if (currentTicketNo && h.ticketNo === currentTicketNo) {
-          return false;
-      }
-
-      // 2. Exclude Future Transactions (in case of full month import)
-      // If we have ticket numbers, use them for precise ordering
+      if (currentTicketNo && h.ticketNo === currentTicketNo) return false;
       if (currentTicketNo && h.ticketNo) {
-          // If history ticket is larger (later) than current, it's not a repurchase *yet*
           if (h.ticketNo > currentTicketNo) return false;
       } else if (currentDate && h.date) {
-          // Fallback to Date comparison if ticket missing
-          // If history date is LATER than current, ignore
           if (h.date > currentDate) return false;
-          // If same date but we don't have tickets to compare, we assume New to be safe (or User preference)
-          // Ideally TicketNo should be present for same-month logic
       }
-
       return true;
   });
 
@@ -298,9 +388,6 @@ export const getMonthlyStatsByStoreAndYear = async (storeName: string, year: str
         .sort((a, b) => b.month.localeCompare(a.month));
 };
 
-/**
- * Fetch records for a specific month with pagination
- */
 export const getHistoryByMonth = async (storeName: string, year: string, month: string, offset = 0, limit = 100): Promise<HistoryRecord[]> => {
     const name = storeName === '未分類 (舊資料)' ? "" : storeName;
     const start = year.length === 4 ? `${year}-${month}-01` : `${year}${month}00`;
@@ -383,52 +470,39 @@ export const deleteProductGroup = async (id: number) => {
 // --- DATABASE BACKUP / RESTORE (OPTIMIZED FOR LARGE DATASETS) ---
 
 export const exportDatabaseToJson = async (): Promise<Blob> => {
-    // Optimization for 7M+ records:
-    // Instead of creating one giant string (which crashes V8 RAM limit ~2GB),
-    // We construct a Blob from an array of chunked strings.
-    
     const chunks: string[] = [];
-    
-    // Header
     chunks.push('{"version":1,"timestamp":' + Date.now() + ',"tables":{');
     
-    // 1. Export History (The Big One)
+    // 1. Export History (Streamed)
     chunks.push('"history":[');
     let count = 0;
-    
-    // Use Dexie's each() to stream records one by one
-    // We collect them in a small buffer to reduce IO/String calls slightly, but keep memory low.
     const BATCH_SIZE = 1000;
     let buffer: string[] = [];
     
     await db.history.each(record => {
-        // Manually stringify to ensure control
         buffer.push(JSON.stringify(record));
         count++;
-        
         if (buffer.length >= BATCH_SIZE) {
-            if (count > BATCH_SIZE) chunks.push(','); // Add comma before this batch if not first
+            if (count > BATCH_SIZE) chunks.push(',');
             chunks.push(buffer.join(','));
             buffer = [];
         }
     });
-    
-    // Flush remaining buffer
     if (buffer.length > 0) {
         if (count > buffer.length) chunks.push(',');
         chunks.push(buffer.join(','));
     }
-    chunks.push('],'); // End history array
+    chunks.push('],');
 
-    // 2. Export Stores (Small)
+    // 2. Export Stores
     const stores = await db.stores.toArray();
     chunks.push('"stores":' + JSON.stringify(stores) + ',');
 
-    // 3. Export Groups (Small)
+    // 3. Export Groups
     const productGroups = await db.productGroups.toArray();
     chunks.push('"productGroups":' + JSON.stringify(productGroups) + ',');
 
-    // 4. Export Templates (Medium - contains Base64 strings)
+    // 4. Export Templates
     const templatesRaw = await db.templates.toArray();
     const bufferToBase64 = (buffer: ArrayBuffer) => {
         let binary = '';
@@ -444,21 +518,13 @@ export const exportDatabaseToJson = async (): Promise<Blob> => {
         data: bufferToBase64(t.data)
     }));
     chunks.push('"templates":' + JSON.stringify(templates));
+    chunks.push('}}');
 
-    // Footer
-    chunks.push('}}'); // End tables object, End root object
-
-    // Create Blob directly from chunks
     return new Blob(chunks, { type: "application/json" });
 };
 
 export const importDatabaseFromJson = async (jsonString: string): Promise<number> => {
     try {
-        // Note: For 7M records, `JSON.parse(jsonString)` might still fail if the string itself 
-        // was loaded into memory. However, reading a file via FileReader as Text is usually the bottleneck.
-        // If import fails on large files, we'd need a streaming JSON parser (not included in standard libs).
-        // For now, we assume the user has enough RAM to parse the string if they managed to read it.
-        
         const data = JSON.parse(jsonString);
         if (!data.tables) throw new Error("無效的備份檔案格式");
 
@@ -472,30 +538,20 @@ export const importDatabaseFromJson = async (jsonString: string): Promise<number
             return bytes.buffer;
         };
 
-        // Use transaction to ensure integrity
         await db.transaction('rw', db.history, db.stores, db.productGroups, db.templates, async () => {
-            // 1. Clear existing
             await db.history.clear();
             await db.stores.clear();
             await db.productGroups.clear();
             await db.templates.clear();
 
-            // 2. Import History
             if (data.tables.history && data.tables.history.length > 0) {
-                // Chunk insert to avoid memory issues
                 const chunkSize = 2000;
                 for (let i = 0; i < data.tables.history.length; i += chunkSize) {
                     await db.history.bulkAdd(data.tables.history.slice(i, i + chunkSize));
                 }
             }
-
-            // 3. Import Stores
             if (data.tables.stores) await db.stores.bulkAdd(data.tables.stores);
-
-            // 4. Import Groups
             if (data.tables.productGroups) await db.productGroups.bulkAdd(data.tables.productGroups);
-
-            // 5. Import Templates
             if (data.tables.templates) {
                 const processedTemplates = data.tables.templates.map((t: any) => ({
                     ...t,
@@ -505,10 +561,10 @@ export const importDatabaseFromJson = async (jsonString: string): Promise<number
             }
         });
         
-        await refreshGroupCache(); // Refresh memory cache
+        await refreshGroupCache();
         return data.tables.history ? data.tables.history.length : 0;
     } catch (e) {
         console.error(e);
-        throw new Error("還原失敗，檔案可能損毀或記憶體不足 (請嘗試分割檔案)");
+        throw new Error("還原失敗，檔案可能損毀或記憶體不足");
     }
 };

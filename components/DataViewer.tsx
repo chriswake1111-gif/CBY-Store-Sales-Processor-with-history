@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { ProcessedData, Stage1Status, RepurchaseOption, StaffRecord, Stage1Row } from '../types';
 import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp, Undo2, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown, RefreshCcw, Calendar } from 'lucide-react';
@@ -23,7 +24,8 @@ interface DataViewerProps {
   allActiveStaff: string[];
   staffRecord?: StaffRecord;
   fullProcessedData?: ProcessedData; 
-  reportDate?: string; // New Prop for Date Display
+  reportDate?: string;
+  staffMasterList?: StaffRecord[];
   
   onClose?: () => void;
 }
@@ -31,7 +33,6 @@ interface DataViewerProps {
 type SortKey = 'date' | 'customerID' | null;
 type SortDirection = 'asc' | 'desc';
 
-// Define interface here to ensure visibility
 interface RepurchaseRowData extends Stage1Row {
     devPoints: number;
     actualSellerPoints: number;
@@ -42,6 +43,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
   currentData, activeTab, setActiveTab, stage1TotalPoints,
   handleStatusChangeStage1, handleToggleDeleteStage2, handleUpdateStage2CustomReward,
   handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord, fullProcessedData, reportDate,
+  staffMasterList = [],
   onClose
 }) => {
   
@@ -198,7 +200,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
     return id.startsWith('00') ? id.substring(2) : id;
   };
 
-  // --- STATISTICS FOR TABS ---
   const pointStats = useMemo(() => {
       if (!currentData || !activePerson || !fullProcessedData) {
           return { dev: 0, rep: 0, tableDev: 0 };
@@ -207,7 +208,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
       let dev = 0;
       let rep = 0;
 
-      // 1. Calculate Own Sales (Dev vs Rep)
       currentData.stage1.forEach(row => {
           if (row.status === Stage1Status.DELETE) return;
 
@@ -218,32 +218,27 @@ const DataViewer: React.FC<DataViewerProps> = ({
               dev += row.calculatedPoints;
           }
           else if (row.status === Stage1Status.RETURN) {
-              // Only count returns that aren't transferred OUT
               if (!row.returnTarget) {
                   dev += row.calculatedPoints;
               }
           }
       });
 
-      // 2. Add Incoming Returns (Penalties from others) to Dev score
       incomingReturns.forEach(row => {
            const points = recalculateStage1Points(row, currentData.role);
            dev += points;
       });
 
-      // 3. Calculate Table Development (Bonuses from being Original Developer)
       let tableDev = 0;
       Object.values(fullProcessedData).forEach((personData: ProcessedData[string]) => {
           personData.stage1.forEach(row => {
               if (row.originalDeveloper === activePerson) {
                   if (row.status === Stage1Status.REPURCHASE) {
-                      // Bonus = Full - Seller's Share
                       const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, personData.role);
                       const sellerPoints = row.calculatedPoints;
                       tableDev += (fullPoints - sellerPoints);
                   } 
                   else if (row.status === Stage1Status.RETURN) {
-                       // Penalty Share = Full Deduction - Seller's Share
                        const fullDeduction = recalculateStage1Points({ ...row, originalDeveloper: undefined }, personData.role);
                        const sellerDeduction = recalculateStage1Points(row, personData.role);
                        tableDev += (fullDeduction - sellerDeduction);
@@ -255,7 +250,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
       return { dev, rep, tableDev };
   }, [currentData, activePerson, fullProcessedData, incomingReturns]);
 
-  // --- REPURCHASE SUMMARY MATRIX LOGIC ---
   const repurchaseMatrix = useMemo((): { developers: string[], dataBySeller: Record<string, RepurchaseRowData[]> } => {
       if (!fullProcessedData) return { developers: [], dataBySeller: {} };
 
@@ -295,16 +289,36 @@ const DataViewer: React.FC<DataViewerProps> = ({
           });
       });
 
-      const sortedDevelopers = Array.from(developersSet).sort();
+      // Sort Developers using Role -> ID -> Name logic (Same as App.tsx)
+      const sortedDevelopers = Array.from(developersSet).sort((a, b) => {
+          // Get Role from FullProcessedData first, fallback to Master List
+          const roleA = fullProcessedData[a]?.role || staffMasterList.find(s => s.name === a)?.role || 'SALES';
+          const roleB = fullProcessedData[b]?.role || staffMasterList.find(s => s.name === b)?.role || 'SALES';
+          
+          const pA = roleA === 'SALES' ? 1 : (roleA === 'PHARMACIST' ? 2 : 3);
+          const pB = roleB === 'SALES' ? 1 : (roleB === 'PHARMACIST' ? 2 : 3);
+          
+          if (pA !== pB) return pA - pB;
+
+          // Get ID
+          const staffA = staffMasterList.find(s => s.name === a);
+          const staffB = staffMasterList.find(s => s.name === b);
+          const idA = staffA?.id || '999999';
+          const idB = staffB?.id || '999999';
+
+          if (idA !== idB) return idA.localeCompare(idB, undefined, { numeric: true });
+
+          return a.localeCompare(b, 'zh-TW');
+      });
+
       Object.keys(groupedData).forEach(key => {
           groupedData[key].sort((a, b) => a.date.localeCompare(b.date));
       });
 
       return { developers: sortedDevelopers, dataBySeller: groupedData };
 
-  }, [fullProcessedData]);
+  }, [fullProcessedData, staffMasterList]);
 
-  // Calculate count for Repurchase Tab
   const repurchaseRowCount = useMemo(() => {
      if (!repurchaseMatrix?.dataBySeller) return 0;
      return Object.values(repurchaseMatrix.dataBySeller).reduce((acc: number, rows: RepurchaseRowData[]) => acc + rows.length, 0);
@@ -369,7 +383,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
   return (
     <div ref={rootRef} className="flex flex-col h-full bg-white relative text-sm">
       
-      {/* Top Controls (unchanged) */}
+      {/* Top Controls */}
       <div className="border-b border-gray-300 bg-gray-50 p-2 shrink-0 flex flex-col gap-2">
          {/* Person Bar */}
          <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar items-center border-b border-gray-200 mb-1">
@@ -418,7 +432,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
                     </div>
                 </div>
                 
-                {/* Targets & Date Badge */}
                 <div className="ml-6 flex items-center gap-3">
                      {staffRecord?.pointsStandard !== undefined && (
                          <div className="bg-white px-2.5 py-1 rounded border border-gray-200 shadow-sm flex flex-col items-center">
@@ -475,7 +488,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
       {/* Content Table Area */}
       <div className="flex-1 overflow-auto bg-white border-t border-gray-300">
         
-        {/* === STAGE 1 === (Unchanged) */}
         {activeTab === 'stage1' && (
           <>
             <table className="w-full text-sm text-left whitespace-nowrap border-collapse">
@@ -570,7 +582,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
                 })}
               </tbody>
             </table>
-            {/* Portals ... (unchanged) */}
+            {/* Portals ... */}
             {popoverState && createPortal(
                 <div ref={popoverRef} className="fixed z-[100] bg-white rounded-lg shadow-xl border border-slate-200 p-3 w-64 animate-in fade-in zoom-in-95 duration-100" style={{ left: popoverState.x, top: popoverState.y }}>
                     <div className="text-xs font-bold text-gray-500 mb-2 pb-1 border-b">選擇回購狀態</div>
@@ -617,7 +629,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
           </>
         )}
 
-        {/* ... (Rest of DataViewer) ... */}
+        {/* ... (Stage 2 & 3 - Unchanged) ... */}
         {activeTab === 'stage2' && (
           // ... (Stage 2 implementation unchanged) ...
           isPharm ? (
@@ -649,9 +661,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
                           <td className="px-2 py-1 border border-slate-200 text-right font-bold font-mono text-slate-900">{row.quantity} <span className="text-xs font-normal text-gray-500">{row.rewardLabel}</span></td>
                         </tr>
                       ))}
-                      {currentData.stage2.length === 0 && (
-                        <tr><td colSpan={3} className="p-10 text-center text-gray-400 font-mono">NO DATA FOUND</td></tr>
-                      )}
                     </tbody>
                   </table>
               </div>
@@ -729,7 +738,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
         {/* ... (Stage 3) ... */}
         {activeTab === 'stage3' && !isPharm && (
           <div className="p-4 flex justify-center h-full items-start bg-slate-50">
-             {/* Stage 3 content same as before */}
              <div className="border border-slate-300 bg-white w-full max-w-lg shadow-sm">
                 <div className="bg-slate-200 px-4 py-2 border-b border-slate-300 flex justify-between items-center">
                     <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2 uppercase">Cosmetic Analysis</h3>
@@ -756,7 +764,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
           </div>
         )}
 
-        {/* --- REPURCHASE MATRIX (Added) --- */}
+        {/* --- REPURCHASE MATRIX (Updated) --- */}
         {activeTab === 'repurchase' && (
           <div className="flex flex-col h-full bg-slate-50">
              <div className="flex-1 overflow-auto p-4">
@@ -767,19 +775,19 @@ const DataViewer: React.FC<DataViewerProps> = ({
                          <p className="text-xs">請在點數表中標記「回購」或設定「原開發者」</p>
                      </div>
                  ) : (
-                     <div className="bg-white border border-gray-300 shadow-sm overflow-x-auto">
+                     <div className="bg-white border border-gray-300 shadow-sm overflow-x-auto relative rounded-lg">
                         <table className="w-full text-xs text-left whitespace-nowrap border-collapse">
-                            <thead className="bg-slate-100 text-slate-700 font-bold sticky top-0 z-20 shadow-sm">
+                            <thead className="bg-slate-100 text-slate-700 font-bold sticky top-0 z-20 shadow-sm border-b-2 border-slate-300">
                                 <tr>
-                                    <th className="p-2 border border-slate-300 min-w-[80px] bg-slate-100 sticky left-0 z-30">銷售員</th>
-                                    <th className="p-2 border border-slate-300 min-w-[80px] bg-slate-100">日期</th>
-                                    <th className="p-2 border border-slate-300 min-w-[80px] bg-slate-100">客戶</th>
-                                    <th className="p-2 border border-slate-300 min-w-[80px] bg-slate-100">品項</th>
-                                    <th className="p-2 border border-slate-300 min-w-[150px] bg-slate-100">品名</th>
-                                    <th className="p-2 border border-slate-300 min-w-[80px] bg-slate-100">狀態</th>
-                                    <th className="p-2 border border-slate-300 min-w-[60px] text-right bg-amber-50 text-amber-800 border-b-amber-200">回購點數</th>
+                                    <th className="p-2 border-r border-slate-300 min-w-[80px] bg-slate-100 sticky left-0 z-30 shadow-md">銷售員</th>
+                                    <th className="p-2 border-r border-slate-300 min-w-[80px] bg-slate-100">日期</th>
+                                    <th className="p-2 border-r border-slate-300 min-w-[80px] bg-slate-100">客戶</th>
+                                    <th className="p-2 border-r border-slate-300 min-w-[80px] bg-slate-100">品項</th>
+                                    <th className="p-2 border-r border-slate-300 min-w-[150px] bg-slate-100">品名</th>
+                                    <th className="p-2 border-r border-slate-300 min-w-[80px] bg-slate-100">狀態</th>
+                                    <th className="p-2 border-r-2 border-slate-300 min-w-[60px] text-right bg-amber-50 text-amber-800">回購點數</th>
                                     {repurchaseMatrix.developers.map(dev => (
-                                        <th key={dev} className="p-2 border border-slate-300 min-w-[60px] text-center bg-purple-50 text-purple-800 border-b-purple-200">
+                                        <th key={dev} className="p-2 border-r border-slate-300 min-w-[60px] text-center bg-purple-50 text-purple-800">
                                             {dev}<br/><span className="text-[9px] font-normal opacity-70">開發點數</span>
                                         </th>
                                     ))}
@@ -796,12 +804,12 @@ const DataViewer: React.FC<DataViewerProps> = ({
                                     return (
                                         <React.Fragment key={seller}>
                                             {/* Section Header */}
-                                            <tr className="bg-slate-50 font-bold border-t-2 border-slate-300">
-                                                <td className="p-2 border border-slate-300 sticky left-0 bg-slate-50 z-10 text-slate-800">{seller}</td>
-                                                <td colSpan={5} className="p-2 border border-slate-300 text-right text-slate-500 text-[10px] uppercase tracking-wider">Subtotal</td>
-                                                <td className="p-2 border border-slate-300 text-right text-amber-700 bg-amber-50/50">{sellerTotal}</td>
+                                            <tr className="bg-slate-50 font-bold border-t-2 border-slate-300 sticky z-10">
+                                                <td className="p-2 border-r border-slate-300 sticky left-0 bg-slate-100 z-10 text-slate-800 shadow-md">{seller}</td>
+                                                <td colSpan={5} className="p-2 border-r border-slate-300 text-right text-slate-500 text-[10px] uppercase tracking-wider bg-slate-50">Subtotal</td>
+                                                <td className="p-2 border-r-2 border-slate-300 text-right text-amber-700 bg-amber-50/50">{sellerTotal}</td>
                                                 {devTotals.map((total, i) => (
-                                                    <td key={i} className={`p-2 border border-slate-300 text-center ${total !== 0 ? 'text-purple-700 bg-purple-50/50' : 'text-gray-300'}`}>
+                                                    <td key={i} className={`p-2 border-r border-slate-300 text-center bg-slate-50 ${total !== 0 ? 'text-purple-700 font-black' : 'text-gray-300'}`}>
                                                         {total !== 0 ? total : '-'}
                                                     </td>
                                                 ))}
@@ -810,20 +818,20 @@ const DataViewer: React.FC<DataViewerProps> = ({
                                             {rows.map((row, rIdx) => {
                                                 const isReturn = row.status === Stage1Status.RETURN;
                                                 return (
-                                                    <tr key={row.id} className="hover:bg-yellow-50 bg-white">
-                                                        <td className="p-2 border border-slate-200 sticky left-0 bg-white group-hover:bg-yellow-50 z-10 text-gray-400">{seller}</td>
-                                                        <td className="p-2 border border-slate-200 font-mono">{row.date}</td>
-                                                        <td className="p-2 border border-slate-200 font-mono">{formatCID(row.customerID)}</td>
-                                                        <td className="p-2 border border-slate-200 font-mono text-[11px]">{row.itemID}</td>
-                                                        <td className="p-2 border border-slate-200 truncate max-w-[150px]" title={row.itemName}>{row.itemName}</td>
-                                                        <td className="p-2 border border-slate-200 truncate max-w-[100px] text-[10px] text-gray-500">{row.repurchaseType || row.status}</td>
-                                                        <td className={`p-2 border border-slate-200 text-right font-bold ${isReturn ? 'text-red-600' : 'text-amber-600 bg-amber-50/30'}`}>
+                                                    <tr key={row.id} className="hover:bg-yellow-50 bg-white border-b border-gray-100">
+                                                        <td className="p-2 border-r border-slate-200 sticky left-0 bg-white group-hover:bg-yellow-50 z-10 text-gray-300 shadow-sm">{seller}</td>
+                                                        <td className="p-2 border-r border-slate-200 font-mono">{row.date}</td>
+                                                        <td className="p-2 border-r border-slate-200 font-mono">{formatCID(row.customerID)}</td>
+                                                        <td className="p-2 border-r border-slate-200 font-mono text-[11px]">{row.itemID}</td>
+                                                        <td className="p-2 border-r border-slate-200 truncate max-w-[150px]" title={row.itemName}>{row.itemName}</td>
+                                                        <td className="p-2 border-r border-slate-200 truncate max-w-[100px] text-[10px] text-gray-500">{row.repurchaseType || row.status}</td>
+                                                        <td className={`p-2 border-r-2 border-slate-200 text-right font-bold ${isReturn ? 'text-red-600' : 'text-amber-600 bg-amber-50/30'}`}>
                                                             {row.actualSellerPoints}
                                                         </td>
                                                         {repurchaseMatrix.developers.map((dev, dIdx) => {
                                                             const isTarget = row.originalDeveloper === dev;
                                                             return (
-                                                                <td key={dIdx} className={`p-2 border border-slate-200 text-center ${isTarget ? (isReturn ? 'text-red-500 font-bold bg-red-50/30' : 'text-purple-600 font-bold bg-purple-50/30') : ''}`}>
+                                                                <td key={dIdx} className={`p-2 border-r border-slate-200 text-center ${isTarget ? (isReturn ? 'text-red-500 font-bold bg-red-50/30' : 'text-purple-600 font-bold bg-purple-50/30') : ''}`}>
                                                                     {isTarget ? row.devPoints : ''}
                                                                 </td>
                                                             );

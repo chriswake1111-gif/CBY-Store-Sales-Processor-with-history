@@ -2,7 +2,7 @@
 import { RawRow, ExclusionItem, RewardRule, Stage1Row, Stage2Row, Stage3Summary, Stage1Status, Stage3Row, StaffRole } from '../types';
 import { COL_HEADERS, CAT_MAPPING, COSMETIC_CODES, STAGE1_SORT_ORDER, COSMETIC_DISPLAY_ORDER } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
-import { checkRepurchase } from './db';
+import { checkRepurchaseSync, HistoryCache } from './db';
 
 // Helper: Safely get values
 const getVal = (row: RawRow, key: string): any => row[key];
@@ -25,16 +25,16 @@ export const determineCategory = (row: RawRow): string => {
 };
 
 // --- STAGE 1: Points Table (Dispatcher) ---
-// Now Async
-export const processStage1 = async (rawData: RawRow[], exclusionList: ExclusionItem[], role: StaffRole): Promise<Stage1Row[]> => {
+// Now accepts HistoryCache for synchronous processing
+export const processStage1 = async (rawData: RawRow[], exclusionList: ExclusionItem[], role: StaffRole, historyCache: HistoryCache): Promise<Stage1Row[]> => {
   if (role === 'PHARMACIST') {
-    return await processStage1Pharmacist(rawData, exclusionList);
+    return processStage1Pharmacist(rawData, exclusionList, historyCache);
   }
-  return await processStage1Sales(rawData, exclusionList);
+  return processStage1Sales(rawData, exclusionList, historyCache);
 };
 
 // Logic for Sales Person (Store)
-const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionItem[]): Promise<Stage1Row[]> => {
+const processStage1Sales = (rawData: RawRow[], exclusionList: ExclusionItem[], historyCache: HistoryCache): Stage1Row[] => {
   const dispensingItemIDs = new Set(
     exclusionList
       .filter(item => item.category === '調劑點數')
@@ -48,31 +48,25 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
     const cid = getVal(row, COL_HEADERS.CUSTOMER_ID);
     if (!cid || cid === 'undefined') continue;
 
-    // 2. Zero Value Checks (Must happen before Return logic)
-    // If unit price is 0, it's likely a gift or system error -> Skip
+    // 2. Zero Value Checks
     if (getNum(row, COL_HEADERS.UNIT_PRICE) === 0) continue;
 
-    // If original points are 0, there is no bonus to give OR take away -> Skip
     const points = getNum(row, COL_HEADERS.POINTS) || getNum(row, '點數');
     if (points === 0) continue;
 
     // 3. Exclusion List Checks
     const cat1 = getStr(row, COL_HEADERS.CAT_1);
     const unit = getStr(row, COL_HEADERS.UNIT);
-    // Exclude Specific Milk Cans
     if (cat1 === '05-2' && (unit === '罐' || unit === '瓶')) continue;
 
     const itemID = getStr(row, COL_HEADERS.ITEM_ID);
-    // Exclude Pharmacist Items
     if (dispensingItemIDs.has(itemID)) continue;
 
-    // 4. Debt Check (Contextual)
+    // 4. Debt Check
     const qty = getNum(row, COL_HEADERS.QUANTITY);
     const debt = getNum(row, COL_HEADERS.DEBT);
     const isReturn = qty < 0;
 
-    // If it's a SALE (qty > 0) and has DEBT, skip it (No points for debt).
-    // If it's a RETURN (qty < 0), we ignore the debt column (allow it to pass to deduct points).
     if (!isReturn && debt > 0) continue;
 
     // --- DATA PREPARATION ---
@@ -86,25 +80,18 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
     // Extract full date for repurchase checking
     const fullDate = String(row[COL_HEADERS.SALES_DATE] || ticketNo || '').trim();
 
-    // Determine Base Category
     let category = determineCategory(row);
     let calculatedPoints = 0;
     let status = Stage1Status.DEVELOP;
 
-    // --- 5. FINAL CLASSIFICATION (Return vs Sale) ---
+    // --- 5. FINAL CLASSIFICATION ---
     
     if (isReturn) {
-        // --- RETURN LOGIC ---
         status = Stage1Status.RETURN;
-        
-        // IMPORTANT: Only override category to '退換貨' if a return target is ALREADY set (e.g. from history re-processing).
-        // Otherwise, keep the product category (e.g., '成人奶粉') so it sorts with similar items.
-        // We will handle the category switch in the UI when the user selects a target.
         if (row.returnTarget) {
             category = '退換貨';
         }
 
-        // Logic for Points Calculation
         if (category === '現金-小兒銷售') {
             calculatedPoints = 0;
         } else {
@@ -112,7 +99,6 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
             if (isDividedByQty) {
                  const absPts = Math.abs(rawPoints);
                  const absQty = Math.abs(qty || 1);
-                 // Calculate unit point then negation
                  const ptsPerItem = Math.floor(absPts / absQty);
                  calculatedPoints = -ptsPerItem;
             } else {
@@ -121,9 +107,6 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
         }
 
     } else {
-        // --- SALES LOGIC ---
-        
-        // Calculate Initial Points
         if (category === '現金-小兒銷售') {
             calculatedPoints = 0;
         } else {
@@ -135,14 +118,11 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
             }
         }
 
-        // Check Repurchase (Async)
-        // Only check if it carries points or is specific tracking category
+        // Check Repurchase (Synchronous using Cache)
         if (calculatedPoints > 0 || category === '現金-小兒銷售') {
-           // Pass ticketNo and fullDate for robust checking against same-month imports
-           const isRepurchase = await checkRepurchase(cid, itemID, ticketNo, fullDate);
+           const isRepurchase = checkRepurchaseSync(historyCache, cid, itemID, ticketNo, fullDate);
            if (isRepurchase) {
               status = Stage1Status.REPURCHASE;
-              // Apply repurchase penalty
               if (calculatedPoints > 0) {
                  calculatedPoints = Math.floor(calculatedPoints / 2);
               }
@@ -172,7 +152,7 @@ const processStage1Sales = async (rawData: RawRow[], exclusionList: ExclusionIte
 };
 
 // Logic for Pharmacist
-const processStage1Pharmacist = async (rawData: RawRow[], exclusionList: ExclusionItem[]): Promise<Stage1Row[]> => {
+const processStage1Pharmacist = (rawData: RawRow[], exclusionList: ExclusionItem[], historyCache: HistoryCache): Stage1Row[] => {
   const pharmListMap = new Map<string, string>(); 
   exclusionList.forEach(i => pharmListMap.set(String(i.itemID).trim(), i.category));
 
@@ -193,15 +173,11 @@ const processStage1Pharmacist = async (rawData: RawRow[], exclusionList: Exclusi
     const itemName = getVal(row, COL_HEADERS.ITEM_NAME) || getVal(row, '品名') || '';
     const ticketNo = getStr(row, COL_HEADERS.TICKET_NO);
     const dateStr = ticketNo.length >= 7 ? ticketNo.substring(5, 7) : '??';
-    
-    // Extract full date for repurchase checking
     const fullDate = String(row[COL_HEADERS.SALES_DATE] || ticketNo || '').trim();
 
-    // Extract new fields
     const amount = getNum(row, COL_HEADERS.SUBTOTAL);
     const discountRatio = getStr(row, COL_HEADERS.DISCOUNT_RATIO);
 
-    // 2. Determine Category First
     let isMatch = false;
     let category = '';
     let calculatedPoints = points;
@@ -232,32 +208,23 @@ const processStage1Pharmacist = async (rawData: RawRow[], exclusionList: Exclusi
 
     if (!isMatch) continue;
 
-    // For Pharmacist, returns usually go to specific bucket or '退換貨'
     if (isReturn) category = '退換貨';
 
-    // 3. Conditional CID Filter based on Category
     const rawCid = getVal(row, COL_HEADERS.CUSTOMER_ID);
     const hasCid = rawCid && rawCid !== 'undefined' && String(rawCid).trim() !== '';
 
-    // Rule: '調劑點數' keeps empty CID. Others ('成人奶粉', '其他') must have CID.
     if (category !== '調劑點數' && category !== '退換貨' && !hasCid) {
         continue;
     }
-    // Return requires CID usually? Let's assume yes unless it was dispensing
-    if (category === '退換貨' && !hasCid) {
-         // Relaxed check for returns, but ideally returns have CIDs
-    }
-
     const cid = hasCid ? rawCid : ''; 
 
-    // --- ASYNC HISTORY CHECK ---
+    // --- CHECK REPURCHASE (Sync) ---
     let status = Stage1Status.DEVELOP;
     
     if (isReturn) {
         status = Stage1Status.RETURN;
     } else if (hasCid && category !== '調劑點數') {
-        // Pass ticketNo and fullDate
-        const isRepurchase = await checkRepurchase(cid, itemID, ticketNo, fullDate);
+        const isRepurchase = checkRepurchaseSync(historyCache, cid, itemID, ticketNo, fullDate);
         if (isRepurchase) {
             status = Stage1Status.REPURCHASE;
             if (calculatedPoints > 0) {
@@ -314,21 +281,8 @@ export const recalculateStage1Points = (row: Stage1Row, role: StaffRole = 'SALES
 
   // Handle Return Logic
   if (row.status === Stage1Status.RETURN) {
-      // Logic:
-      // 1. If no Original Developer is selected: Original Seller takes full hit.
-      // 2. If Original Developer IS selected: 
-      //    - Points split 50/50.
-      //    - If Odd, Developer takes the extra -1.
-      
       const hasDev = row.originalDeveloper && row.originalDeveloper !== '無';
-      const isNegative = base < 0; // Should be true for returns
-      
-      // Calculate Base Value for Single Unit logic (same as normal)
-      // Note: We use row.category which might be '退換貨'.
-      // If it is '退換貨', we can't easily know if it was '成人奶粉' for division logic without re-checking raw data.
-      // BUT, 'processStage1' handles the division and stores it in 'calculatedPoints' initially.
-      // 'recalculateStage1Points' is called on updates. 
-      // We should check natural category to decide division logic.
+      const isNegative = base < 0; 
       const naturalCategory = determineCategory(row.raw);
 
       let calculatedBase = base;
@@ -345,8 +299,7 @@ export const recalculateStage1Points = (row: Stage1Row, role: StaffRole = 'SALES
       if (!hasDev) {
           return calculatedBase; // Full deduction
       } else {
-          // Shared deduction
-          return Math.ceil(calculatedBase / 2);
+          return Math.ceil(calculatedBase / 2); // Shared deduction
       }
   }
 
@@ -376,7 +329,6 @@ export const recalculateStage1Points = (row: Stage1Row, role: StaffRole = 'SALES
 };
 
 // --- STAGE 2: Rewards ---
-// (No change needed for Stage 2 as it doesn't use history, but kept sync)
 export const processStage2 = (rawData: RawRow[], rewardRules: RewardRule[], role: StaffRole = 'SALES'): Stage2Row[] => {
   if (role === 'PHARMACIST') {
     return processStage2Pharmacist(rawData);
@@ -398,7 +350,6 @@ const processStage2Sales = (rawData: RawRow[], rewardRules: RewardRule[]): Stage
     if (!cid || cid === 'undefined') continue;
     if (getNum(row, COL_HEADERS.UNIT_PRICE) === 0) continue;
     
-    // Allow returns in Stage 2 (negative quantity)
     const qty = getNum(row, COL_HEADERS.QUANTITY);
     const debt = getNum(row, COL_HEADERS.DEBT);
     if (qty >= 0 && debt > 0) continue;
@@ -454,7 +405,7 @@ const processStage2Pharmacist = (rawData: RawRow[]): Stage2Row[] => {
 
   const results: Stage2Row[] = [];
   
-  if (qty1727 > 0 || qty1727 < 0) { // Allow negative
+  if (qty1727 > 0 || qty1727 < 0) {
     results.push({
       id: uuidv4(),
       salesPerson: person,

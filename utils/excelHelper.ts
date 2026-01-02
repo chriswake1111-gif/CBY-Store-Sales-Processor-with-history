@@ -68,7 +68,7 @@ export const exportToExcel = async (
   
   const outWorkbook = new ExcelJS.Workbook();
 
-  // Sort Logic: SALES (1) -> PHARMACIST (2) -> OTHERS (3), then by Name
+  // Sort Logic: SALES (1) -> PHARMACIST (2) -> OTHERS (3), then by ID asc
   const sortedPersons = Object.keys(processedData).sort((a, b) => {
     const roleA = processedData[a].role;
     const roleB = processedData[b].role;
@@ -76,6 +76,14 @@ export const exportToExcel = async (
     const pB = roleB === 'SALES' ? 1 : (roleB === 'PHARMACIST' ? 2 : 3);
     
     if (pA !== pB) return pA - pB;
+
+    const staffA = staffMasterList.find(s => s.name === a);
+    const staffB = staffMasterList.find(s => s.name === b);
+    const idA = staffA?.id || '999999';
+    const idB = staffB?.id || '999999';
+
+    if (idA !== idB) return idA.localeCompare(idB, undefined, { numeric: true });
+
     return a.localeCompare(b, 'zh-TW');
   });
 
@@ -289,7 +297,30 @@ export const exportToExcel = async (
 
         // 1. Stage 1 Data (List)
         finalStage1.forEach(row => {
-            const note = data.role === 'PHARMACIST' ? (row.category === '調劑點數' ? '' : row.status) : row.status;
+            // Determine Note content based on Role and Category
+            let note: string = row.status; // Default to basic status
+
+            if (data.role === 'PHARMACIST') {
+                if (row.category === '調劑點數') {
+                    note = `${row.quantity}份`;
+                } else {
+                    // For '其他' or standard items
+                    if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) {
+                        note = row.repurchaseType;
+                    }
+                }
+            } else {
+                // SALES
+                if (row.category === '現金-小兒銷售') {
+                    note = `${row.quantity}罐`;
+                } else {
+                    // Standard Categories
+                    if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) {
+                        note = row.repurchaseType;
+                    }
+                }
+            }
+
             let pts = 0;
             if (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') {
                 pts = 0;
@@ -313,6 +344,44 @@ export const exportToExcel = async (
         // Stage 2 Logic
         // For Pharmacist in Template Mode: Use Fixed Cells if configured
         if (data.role === 'PHARMACIST') {
+            // 1. Calculate Pharmacist Point Stats
+            const pointsDev = finalStage1.reduce((acc, row) => {
+                if (row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR || row.status === Stage1Status.RETURN) {
+                    return acc + recalculateStage1Points(row, data.role);
+                }
+                return acc;
+            }, 0);
+
+            const pointsRep = finalStage1.reduce((acc, row) => {
+                if (row.status === Stage1Status.REPURCHASE) return acc + row.calculatedPoints;
+                return acc;
+            }, 0);
+
+            let pointsTableDev = 0;
+            for (const otherPerson of Object.keys(processedData)) {
+                if (otherPerson === person) continue; 
+                const otherData = processedData[otherPerson];
+                otherData.stage1.forEach(row => {
+                    if (row.originalDeveloper === person && row.status === Stage1Status.REPURCHASE) {
+                         const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, otherData.role);
+                         const actualRepurchasePoints = row.calculatedPoints; 
+                         pointsTableDev += (fullPoints - actualRepurchasePoints);
+                    }
+                    if (row.status === Stage1Status.RETURN && row.originalDeveloper === person) {
+                        const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, otherData.role); 
+                        const sellerShare = recalculateStage1Points(row, otherData.role); 
+                        const devShare = fullPoints - sellerShare; 
+                        pointsTableDev += devShare;
+                    }
+                });
+            }
+
+            // Write Pharmacist Points
+            writeToCell(config.cell_pharm_points_dev, pointsDev);
+            writeToCell(config.cell_pharm_points_rep, pointsRep);
+            writeToCell(config.cell_pharm_points_table_dev, pointsTableDev);
+
+            // 2. Dispensing Stats
             const qty1727 = data.stage2.find(r => r.itemID === '001727')?.quantity || 0;
             const qty1345 = data.stage2.find(r => r.itemID === '001345')?.quantity || 0;
             const bonus = Math.max(0, (qty1727 - 300) * 10);
@@ -387,7 +456,30 @@ export const exportToExcel = async (
         addRow(header, true);
 
         finalStage1.forEach(row => {
-            const note = data.role === 'PHARMACIST' ? (row.category === '調劑點數' ? '' : row.status) : row.status;
+            // Determine Note content based on Role and Category
+            let note: string = row.status; // Default to basic status
+
+            if (data.role === 'PHARMACIST') {
+                if (row.category === '調劑點數') {
+                    note = `${row.quantity}份`;
+                } else {
+                    // For '其他' or standard items
+                    if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) {
+                        note = row.repurchaseType;
+                    }
+                }
+            } else {
+                // SALES
+                if (row.category === '現金-小兒銷售') {
+                    note = `${row.quantity}罐`;
+                } else {
+                    // Standard Categories
+                    if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) {
+                        note = row.repurchaseType;
+                    }
+                }
+            }
+
             const pts = (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') ? '' : recalculateStage1Points(row, data.role);
             addRow([
                 safeVal(row.category), safeVal(row.date), formatCID(row.customerID), 
@@ -504,7 +596,28 @@ export const exportToExcel = async (
   // Create Sheet if data exists
   if (Object.keys(matrixData).length > 0) {
       const repSheet = outWorkbook.addWorksheet("回購總表");
-      const sortedDevs = Array.from(developersSet).sort();
+      
+      // Sort Developers by Role -> ID -> Name
+      const sortedDevs = Array.from(developersSet).sort((a, b) => {
+          // Determine Role from Processed Data if available, fallback to master list
+          const roleA = processedData[a]?.role || staffMasterList.find(s => s.name === a)?.role || 'SALES';
+          const roleB = processedData[b]?.role || staffMasterList.find(s => s.name === b)?.role || 'SALES';
+          
+          const pA = roleA === 'SALES' ? 1 : (roleA === 'PHARMACIST' ? 2 : 3);
+          const pB = roleB === 'SALES' ? 1 : (roleB === 'PHARMACIST' ? 2 : 3);
+          
+          if (pA !== pB) return pA - pB;
+
+          // Compare ID
+          const staffA = staffMasterList.find(s => s.name === a);
+          const staffB = staffMasterList.find(s => s.name === b);
+          const idA = staffA?.id || '999999';
+          const idB = staffB?.id || '999999';
+
+          if (idA !== idB) return idA.localeCompare(idB, undefined, { numeric: true });
+
+          return a.localeCompare(b, 'zh-TW');
+      });
 
       // Define Columns Widths
       // Base: 7 cols (A-G) + Developers

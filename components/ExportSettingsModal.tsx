@@ -44,7 +44,10 @@ const DEFAULT_MAPPING: TemplateMapping = {
   // Pharmacist fixed defaults
   cell_pharm_qty_1727: '',
   cell_pharm_qty_1345: '',
-  cell_pharm_bonus: ''
+  cell_pharm_bonus: '',
+  cell_pharm_points_dev: '',
+  cell_pharm_points_table_dev: '',
+  cell_pharm_points_rep: ''
 };
 
 const ExportSettingsModal: React.FC<ExportSettingsModalProps> = ({ onClose }) => {
@@ -396,6 +399,11 @@ const ExportSettingsModal: React.FC<ExportSettingsModalProps> = ({ onClose }) =>
                             {/* Pharmacist Stats */}
                             {activeTypeId === TEMPLATE_IDS.PHARMACIST && (
                                 <>
+                                    <div className="col-span-2 text-xs font-bold text-slate-400 uppercase tracking-wider mt-4 mb-1 border-b pb-1">藥師點數 (預覽介面數值)</div>
+                                    {renderCellInput('個人點數 (開發+半+退)', 'cell_pharm_points_dev', '例如 G2')}
+                                    {renderCellInput('總表回購 (個人回購)', 'cell_pharm_points_rep', '例如 G3')}
+                                    {renderCellInput('總表開發 (他店回購差額)', 'cell_pharm_points_table_dev', '例如 G4')}
+
                                     <div className="col-span-2 text-xs font-bold text-slate-400 uppercase tracking-wider mt-4 mb-1 border-b pb-1">調劑件數與獎金</div>
                                     {renderCellInput('自費調劑 (001727) 數量', 'cell_pharm_qty_1727', '例如 F4')}
                                     {renderCellInput('調劑藥事服務費 (001345) 數量', 'cell_pharm_qty_1345', '例如 F6')}
