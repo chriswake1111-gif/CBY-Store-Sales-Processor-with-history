@@ -168,7 +168,16 @@ export const exportToExcel = async (
         // Define generic helper to write to a cell coordinate
         const writeToCell = (addr: string | undefined, val: any) => {
             if (addr && /^[A-Z]+[0-9]+$/.test(addr)) {
-                 try { sheet.getCell(addr).value = val; } catch {}
+                 try { 
+                     const cell = sheet.getCell(addr);
+                     cell.value = val;
+                     
+                     // Re-apply style from template to ensure merged cell borders persist
+                     if (tmplSourceSheet) {
+                         const tmplCell = tmplSourceSheet.getCell(addr);
+                         applyCellStyle(cell, tmplCell);
+                     }
+                 } catch {}
             }
         };
 
