@@ -146,6 +146,13 @@ export const exportToExcel = async (
     const config = tmplRecord?.config;
     let sheet: ExcelJS.Worksheet;
 
+    // Capture Template List Row Height
+    let tmplListRowHeight: number | undefined;
+    if (tmplSourceSheet && config && config.startRow) {
+         const r = tmplSourceSheet.getRow(config.startRow);
+         if (r && r.height) tmplListRowHeight = r.height;
+    }
+
     if (tmplSourceSheet && config) {
         // TEMPLATE MODE: Create sheet and copy styles
         sheet = outWorkbook.addWorksheet(sheetName);
@@ -232,9 +239,32 @@ export const exportToExcel = async (
         writeToCell(config.staffID, safeVal(staffInfo?.id));
         writeToCell(config.staffName, person);
 
+        // Shared Calculation: Table Dev (Commission from others' repurchase of my development)
+        // This applies to both Sales and Pharmacist if they developed items.
+        let pointsTableDev = 0;
+        for (const otherPerson of Object.keys(processedData)) {
+            if (otherPerson === person) continue; 
+            const otherData = processedData[otherPerson];
+            otherData.stage1.forEach(row => {
+                // Scenario 1: Someone else sold an item I developed (Repurchase) -> I get half points
+                if (row.originalDeveloper === person && row.status === Stage1Status.REPURCHASE) {
+                     const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, otherData.role);
+                     const actualRepurchasePoints = row.calculatedPoints; // Usually half
+                     pointsTableDev += (fullPoints - actualRepurchasePoints);
+                }
+                // Scenario 2: Someone else accepted a return of an item I developed -> I share the deduction
+                if (row.status === Stage1Status.RETURN && row.originalDeveloper === person) {
+                    const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, otherData.role); 
+                    const sellerShare = recalculateStage1Points(row, otherData.role); 
+                    const devShare = fullPoints - sellerShare; 
+                    pointsTableDev += devShare;
+                }
+            });
+        }
+
         if (data.role !== 'PHARMACIST') {
             const pointsDev = finalStage1.reduce((acc, row) => {
-                // Since Repurchase is filtered out, we only sum Develop/Half-Year/Return
+                // Since Repurchase is filtered out from list, we only sum Develop/Half-Year/Return/Incoming
                 if (row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR || row.status === Stage1Status.RETURN) {
                     const pts = recalculateStage1Points(row, data.role);
                     return acc + pts;
@@ -242,36 +272,19 @@ export const exportToExcel = async (
                 return acc;
             }, 0);
 
-            // Points Repurchase on individual sheet is now 0 (hidden)
-            const pointsRep = 0; 
-
-            // Calculate "Table Dev" (Commission from others' repurchase of my development)
-            let pointsTableDev = 0;
-            for (const otherPerson of Object.keys(processedData)) {
-                if (otherPerson === person) continue; 
-                const otherData = processedData[otherPerson];
-                otherData.stage1.forEach(row => {
-                    // Scenario 1: Someone else sold an item I developed (Repurchase) -> I get half points
-                    if (row.originalDeveloper === person && row.status === Stage1Status.REPURCHASE) {
-                         const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, otherData.role);
-                         const actualRepurchasePoints = row.calculatedPoints; // Usually half
-                         pointsTableDev += (fullPoints - actualRepurchasePoints);
-                    }
-                    // Scenario 2: Someone else accepted a return of an item I developed -> I share the deduction
-                    if (row.status === Stage1Status.RETURN && row.originalDeveloper === person) {
-                        const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, otherData.role); 
-                        const sellerShare = recalculateStage1Points(row, otherData.role); 
-                        const devShare = fullPoints - sellerShare; 
-                        pointsTableDev += devShare;
-                    }
-                });
-            }
+            // Points Repurchase: Sum from COMPLETE data (data.stage1) where status is REPURCHASE
+            const pointsRep = data.stage1.reduce((acc, row) => {
+                if (row.status === Stage1Status.REPURCHASE) {
+                    return acc + recalculateStage1Points(row, data.role);
+                }
+                return acc;
+            }, 0);
 
             const getAmt = (key: string) => data.stage3.rows.find(r => r.categoryName.includes(key))?.subTotal || 0;
             
             writeToCell(config.cell_pointsStd, staffInfo?.pointsStandard || ''); 
             writeToCell(config.cell_pointsDev, pointsDev); 
-            writeToCell(config.cell_pointsRep, pointsRep); // Will be 0 or empty based on request
+            writeToCell(config.cell_pointsRep, pointsRep); 
             writeToCell(config.cell_pointsTableDev, pointsTableDev); 
             
             writeToCell(config.cell_cosmeticStd, staffInfo?.cosmeticStandard || ''); 
@@ -305,8 +318,34 @@ export const exportToExcel = async (
             writeToCell(config.cell_rewardFamily, rewardFamily);
             writeToCell(config.cell_rewardPx, rewardPx);
         } else {
-             // Pharmacist Stats
-             // ... Similar logic if needed for Pharmacist specific cells ...
+             // --- PHARMACIST STATS ---
+             const pointsDev = finalStage1.reduce((acc, row) => {
+                return acc + recalculateStage1Points(row, data.role);
+             }, 0);
+
+             const pointsRep = data.stage1.reduce((acc, row) => {
+                if (row.status === Stage1Status.REPURCHASE) {
+                    return acc + recalculateStage1Points(row, data.role);
+                }
+                return acc;
+             }, 0);
+
+             // Calculate Stage 2 Stats (Quantities)
+             let qty1727 = 0;
+             let qty1345 = 0;
+             data.stage2.forEach(row => {
+                 if (row.itemID === '001727') qty1727 += row.quantity;
+                 if (row.itemID === '001345') qty1345 += row.quantity;
+             });
+             const pharmBonus = Math.max(0, (qty1727 - 300) * 10);
+
+             writeToCell(config.cell_pharm_points_dev, pointsDev);
+             writeToCell(config.cell_pharm_points_rep, pointsRep);
+             writeToCell(config.cell_pharm_points_table_dev, pointsTableDev);
+             
+             writeToCell(config.cell_pharm_qty_1727, qty1727);
+             writeToCell(config.cell_pharm_qty_1345, qty1345);
+             writeToCell(config.cell_pharm_bonus, pharmBonus);
         }
 
         // 2. LIST DATA WRITING (Dynamic Rows)
@@ -327,6 +366,12 @@ export const exportToExcel = async (
         // Write Stage 1 List
         finalStage1.forEach(row => {
             let note: string = row.status; 
+            
+            // Check for custom repurchase type (Action 2)
+            if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) {
+                note = row.repurchaseType;
+            }
+
             if (data.role === 'PHARMACIST') {
                 if (row.category === '調劑點數') note = `${row.quantity}份`;
             } else {
@@ -338,6 +383,11 @@ export const exportToExcel = async (
             else pts = recalculateStage1Points(row, data.role);
             
             const ptsDisplay = (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') ? '' : pts;
+
+            // Apply Template Height if available
+            if (tmplListRowHeight) {
+                sheet.getRow(currentRow).height = tmplListRowHeight;
+            }
 
             put(config.category, safeVal(row.category));
             put(config.date, safeVal(row.date));
@@ -357,6 +407,7 @@ export const exportToExcel = async (
              const addSimpleRow = (vals: any[]) => {
                  const r = sheet.getRow(currentRow++);
                  r.values = vals;
+                 if (tmplListRowHeight) r.height = tmplListRowHeight; // Apply height to spacers too
                  r.commit();
              };
              addSimpleRow(["", "", "", "", "", "", ""]); // Spacer
@@ -364,6 +415,7 @@ export const exportToExcel = async (
              
              // Dynamic Header for Stage 2
              const headerRow = sheet.getRow(currentRow);
+             if (tmplListRowHeight) headerRow.height = tmplListRowHeight;
              const hCols = [
                 { k: config.reward_category || config.category, v: '分類' },
                 { k: config.reward_date || config.date, v: '日期' },
@@ -387,6 +439,11 @@ export const exportToExcel = async (
                  if (r.isDeleted) return;
                  let reward = r.format === '禮券' ? `${r.quantity}張` : `${r.customReward ?? (r.quantity * r.reward)}元`;
                  
+                 // Apply Template Height
+                 if (tmplListRowHeight) {
+                    sheet.getRow(currentRow).height = tmplListRowHeight;
+                 }
+
                  put(config.reward_category || config.category, r.category);
                  put(config.reward_date || config.date, r.displayDate);
                  put(config.reward_customerID || config.customerID, formatCID(r.customerID));
@@ -399,6 +456,7 @@ export const exportToExcel = async (
         }
     } else {
         // --- FALLBACK (NO TEMPLATE) ---
+        // ... (Existing fallback logic unchanged) ...
         let startRow = 1;
         if (reportDate) startRow = 2;
 
@@ -429,6 +487,12 @@ export const exportToExcel = async (
 
         finalStage1.forEach(row => {
             let note: string = row.status;
+            
+            // Check for custom repurchase type (Action 2)
+            if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) {
+                note = row.repurchaseType;
+            }
+
             if (data.role === 'PHARMACIST') {
                 if (row.category === '調劑點數') note = `${row.quantity}份`;
             } else {
@@ -653,7 +717,19 @@ function copySheetModel(source: ExcelJS.Worksheet, target: ExcelJS.Worksheet, ma
     if (source.columns) {
         target.columns = source.columns.map(col => ({ header: col.header, key: col.key, width: col.width, style: col.style }));
     }
+    
+    // Copy Sheet Properties (Default Row Height, etc.)
+    if (source.properties) {
+        target.properties = JSON.parse(JSON.stringify(source.properties));
+    }
+    
+    // Copy Page Setup
     target.pageSetup = { ...source.pageSetup };
+
+    // Copy Views (Frozen Panes)
+    if (source.views) {
+        target.views = JSON.parse(JSON.stringify(source.views));
+    }
     
     // Copy Row heights and Styles
     source.eachRow({ includeEmpty: true }, (row, rowNumber) => {
