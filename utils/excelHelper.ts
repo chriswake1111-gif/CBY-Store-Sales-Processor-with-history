@@ -410,7 +410,7 @@ export const exportToExcel = async (
                  if (tmplListRowHeight) r.height = tmplListRowHeight; // Apply height to spacers too
                  r.commit();
              };
-             addSimpleRow(["", "", "", "", "", "", ""]); // Spacer
+             // addSimpleRow(["", "", "", "", "", "", ""]); // Spacer REMOVED
              addSimpleRow(["--- 現金獎勵/禮券 ---"]);
              
              // Dynamic Header for Stage 2
@@ -423,6 +423,7 @@ export const exportToExcel = async (
                 { k: config.reward_itemID || config.itemID, v: '品號' },
                 { k: config.reward_itemName || config.itemName, v: '品名' },
                 { k: config.reward_quantity || config.quantity, v: '數量' },
+                { k: config.reward_note || config.note, v: '備註' },
                 { k: config.reward_amount || 'H', v: '獎勵' }
              ];
              hCols.forEach(h => {
@@ -431,6 +432,7 @@ export const exportToExcel = async (
                     c.value = h.v;
                     c.font = { bold: true };
                     c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } };
+                    c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
                  }
              });
              currentRow++;
@@ -450,6 +452,7 @@ export const exportToExcel = async (
                  put(config.reward_itemID || config.itemID, r.itemID);
                  put(config.reward_itemName || config.itemName, r.itemName);
                  put(config.reward_quantity || config.quantity, r.quantity);
+                 put(config.reward_note || config.note, r.note); 
                  put(config.reward_amount || 'H', reward); 
                  currentRow++;
              });
