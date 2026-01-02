@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
+import saveAs from 'file-saver';
 import { ProcessedData, Stage1Status, StaffRecord } from '../types';
 import { recalculateStage1Points } from './processor';
 
