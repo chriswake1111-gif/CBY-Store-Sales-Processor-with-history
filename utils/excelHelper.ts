@@ -367,8 +367,8 @@ export const exportToExcel = async (
         finalStage1.forEach(row => {
             let note: string = row.status; 
             
-            // Check for custom repurchase type (Action 2)
-            if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) {
+            // Check for custom repurchase type (Action 2) - Use if present regardless of status
+            if (row.repurchaseType) {
                 note = row.repurchaseType;
             }
 
@@ -491,8 +491,8 @@ export const exportToExcel = async (
         finalStage1.forEach(row => {
             let note: string = row.status;
             
-            // Check for custom repurchase type (Action 2)
-            if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) {
+            // Check for custom repurchase type (Action 2) - Use if present regardless of status
+            if (row.repurchaseType) {
                 note = row.repurchaseType;
             }
 
