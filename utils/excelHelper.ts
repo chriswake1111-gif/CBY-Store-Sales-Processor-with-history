@@ -3,6 +3,7 @@ import saveAs from 'file-saver';
 import { ProcessedData, Stage1Status, Stage1Row, StaffRecord } from '../types';
 import { getTemplate, TEMPLATE_IDS, TemplateRecord } from './db';
 import { recalculateStage1Points } from './processor';
+import { STAGE1_SORT_ORDER } from '../constants';
 
 // Helper for reading input files
 export const readExcelFile = (file: File): Promise<any[]> => {
@@ -194,9 +195,20 @@ export const exportToExcel = async (
         });
     });
 
-    // Sort by Date
-    finalStage1.sort((a, b) => a.date.localeCompare(b.date));
+    // Sort by Category (using logic) then Date
+    finalStage1.sort((a, b) => {
+        const orderA = STAGE1_SORT_ORDER[a.category] ?? 99;
+        const orderB = STAGE1_SORT_ORDER[b.category] ?? 99;
+        if (orderA !== orderB) return orderA - orderB;
+        if (a.category !== b.category) return a.category.localeCompare(b.category, 'zh-TW');
+        return a.date.localeCompare(b.date);
+    });
 
+    // Sort Stage 2 by Category then Date
+    const finalStage2 = [...data.stage2].sort((a, b) => {
+        if (a.category !== b.category) return a.category.localeCompare(b.category, 'zh-TW');
+        return a.displayDate.localeCompare(b.displayDate);
+    });
 
     // --- WRITE DATA ---
     if (config && tmplSourceSheet) {
@@ -276,7 +288,7 @@ export const exportToExcel = async (
             let rewardFamily = 0;
             let rewardPx = 0;
 
-            data.stage2.forEach(row => {
+            finalStage2.forEach(row => {
                 if (row.isDeleted) return;
                 if (row.format === '禮券') {
                     const label = (row.rewardLabel || '').toLowerCase();
@@ -340,7 +352,7 @@ export const exportToExcel = async (
         });
 
         // Write Stage 2 List (Rewards)
-        if (data.role === 'SALES' && data.stage2.length > 0) {
+        if (data.role === 'SALES' && finalStage2.length > 0) {
              // Add a spacer row or header if needed, then write Stage 2
              const addSimpleRow = (vals: any[]) => {
                  const r = sheet.getRow(currentRow++);
@@ -371,7 +383,7 @@ export const exportToExcel = async (
              });
              currentRow++;
 
-             data.stage2.forEach(r => {
+             finalStage2.forEach(r => {
                  if (r.isDeleted) return;
                  let reward = r.format === '禮券' ? `${r.quantity}張` : `${r.customReward ?? (r.quantity * r.reward)}元`;
                  
@@ -436,13 +448,13 @@ export const exportToExcel = async (
         if (data.role === 'PHARMACIST') {
             addRow([`【第二階段：當月調劑件數】`], false, true);
             addRow(["品項編號", "品名", "數量"], true);
-            data.stage2.forEach(row => {
+            finalStage2.forEach(row => {
                 const label = row.itemID === '001727' ? '件' : '組';
                 addRow([safeVal(row.itemID), safeVal(row.itemName), `${safeVal(row.quantity)}${label}`]);
             });
 
         } else {
-            const s2Totals = data.stage2.reduce((acc, row) => {
+            const s2Totals = finalStage2.reduce((acc, row) => {
                 if (row.isDeleted) return acc;
                 if (row.format === '禮券') acc.vouchers += row.quantity;
                 else {
@@ -454,7 +466,7 @@ export const exportToExcel = async (
 
             addRow([`【第二階段：現金獎勵表】 現金$${s2Totals.cash.toLocaleString()} 禮券${s2Totals.vouchers}張`], false, true);
             addRow(["類別", "日期", "客戶編號", "品項編號", "品名", "數量", "備註", "獎勵"], true);
-            data.stage2.forEach(row => {
+            finalStage2.forEach(row => {
                 if (row.isDeleted) return;
                 let rewardDisplay = "";
                 if (row.format === '禮券') rewardDisplay = `${row.quantity}張${safeVal(row.rewardLabel)}`;
