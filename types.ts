@@ -35,6 +35,8 @@ export interface Stage2Row {
   id: string; salesPerson: string; displayDate: string; sortDate: any; customerID: string; customerName: string;
   itemID: string; itemName: string; quantity: number; category: string; note: string;
   reward: number; rewardLabel: string; customReward?: number; format: string; isDeleted: boolean;
+  amount?: number; // New: For UI display only
+  discountRatio?: string; // New: For UI display only
 }
 
 export interface Stage3Row { categoryName: string; subTotal: number; }

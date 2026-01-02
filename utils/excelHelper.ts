@@ -1,6 +1,8 @@
 
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
+// @ts-ignore
+import saveAs from 'file-saver';
 import { ProcessedData, Stage1Status, Stage1Row, StaffRecord } from '../types';
 import { getTemplate, TEMPLATE_IDS, TemplateRecord, TemplateMapping } from './db';
 import { recalculateStage1Points } from './processor';
@@ -46,12 +48,11 @@ export const exportToExcel = async (
     defaultFilename: string, 
     selectedPersons: Set<string>,
     staffMasterList: StaffRecord[] = [],
-    reportDate?: string // New Parameter for Year/Month string
+    reportDate?: string
 ) => {
   // 1. Load All Templates
   const salesTmpl = await getTemplate(TEMPLATE_IDS.SALES);
   const pharmTmpl = await getTemplate(TEMPLATE_IDS.PHARMACIST);
-  // Note: We ignore Repurchase Template for Matrix View as it's dynamic
   
   // Pre-load Template Workbooks
   const loadTmplWB = async (tmpl: TemplateRecord | undefined) => {
@@ -121,7 +122,6 @@ export const exportToExcel = async (
         if (reportDate) {
             const cell = sheet.getCell('A1');
             cell.value = reportDate;
-            // Style is already copied by copySheetModel logic
         }
 
     } else {
@@ -139,15 +139,12 @@ export const exportToExcel = async (
     }
     
     // GATHER DATA: COMBINE OWN DATA WITH INCOMING RETURNS
-    // 1. Filter Own Data: Exclude Deleted AND Outgoing Returns
     const finalStage1 = data.stage1.filter(row => {
          if (row.status === Stage1Status.DELETE) return false;
-         // Exclude outgoing returns (where I am source, but target is set)
          if (row.status === Stage1Status.RETURN && row.returnTarget) return false;
          return true;
     });
 
-    // 2. Add Incoming Returns (From Others)
     Object.keys(processedData).forEach(otherPerson => {
         if (otherPerson === person) return;
         processedData[otherPerson].stage1.forEach(row => {
@@ -158,21 +155,17 @@ export const exportToExcel = async (
     });
 
 
-    // --- WRITE DATA (Logic branching for Template vs No Template) ---
+    // --- WRITE DATA ---
     if (config) {
         // TEMPLATE MODE
         
-        // Lookup staff info early for both Stats and List Rows
         const staffInfo = staffMasterList.find(s => s.name === person);
 
-        // Define generic helper to write to a cell coordinate
         const writeToCell = (addr: string | undefined, val: any) => {
             if (addr && /^[A-Z]+[0-9]+$/.test(addr)) {
                  try { 
                      const cell = sheet.getCell(addr);
                      cell.value = val;
-                     
-                     // Re-apply style from template to ensure merged cell borders persist
                      if (tmplSourceSheet) {
                          const tmplCell = tmplSourceSheet.getCell(addr);
                          applyCellStyle(cell, tmplCell);
@@ -181,18 +174,14 @@ export const exportToExcel = async (
             }
         };
 
-        // --- WRITE BASIC INFO (Single Cell) ---
+        // --- WRITE BASIC INFO ---
         writeToCell(config.storeName, safeVal(staffInfo?.branch));
         writeToCell(config.staffID, safeVal(staffInfo?.id));
         writeToCell(config.staffName, person);
 
-        // 1. STATS FILLING (Only for Sales / Template Mode)
+        // 1. STATS FILLING
         if (data.role !== 'PHARMACIST') {
-            
-            // Calculate Stats based on FINAL STAGE 1 (including injected returns)
-            // A. Points
             const pointsDev = finalStage1.reduce((acc, row) => {
-                // "個人開發" = Develop + Half Year + Return (Calculated points already handled)
                 if (row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR || row.status === Stage1Status.RETURN) {
                     const pts = recalculateStage1Points(row, data.role);
                     return acc + pts;
@@ -201,27 +190,20 @@ export const exportToExcel = async (
             }, 0);
 
             const pointsRep = finalStage1.reduce((acc, row) => {
-                // "總表回購" = Repurchase Only (Points for self from self)
-                if (row.status === Stage1Status.REPURCHASE) {
-                    return acc + row.calculatedPoints;
-                }
+                if (row.status === Stage1Status.REPURCHASE) return acc + row.calculatedPoints;
                 return acc;
             }, 0);
 
-            // "總表開發" logic
             let pointsTableDev = 0;
             for (const otherPerson of Object.keys(processedData)) {
                 if (otherPerson === person) continue; 
                 const otherData = processedData[otherPerson];
                 otherData.stage1.forEach(row => {
-                    // Standard Repurchase Logic
                     if (row.originalDeveloper === person && row.status === Stage1Status.REPURCHASE) {
                          const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, otherData.role);
-                         const actualRepurchasePoints = row.calculatedPoints; // This is 50%
+                         const actualRepurchasePoints = row.calculatedPoints; 
                          pointsTableDev += (fullPoints - actualRepurchasePoints);
                     }
-                    
-                    // Return Splitting Logic
                     if (row.status === Stage1Status.RETURN && row.originalDeveloper === person) {
                         const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, otherData.role); 
                         const sellerShare = recalculateStage1Points(row, otherData.role); 
@@ -231,19 +213,21 @@ export const exportToExcel = async (
                 });
             }
 
-            // B. Cosmetics
-            const getAmt = (key: string) => {
-                const row = data.stage3.rows.find(r => r.categoryName.includes(key));
-                return row ? row.subTotal : 0;
-            };
-            const amtLrp = getAmt('理膚');
-            const amtCerave = getAmt('適樂膚');
-            const amtDrSatin = getAmt('Dr.Satin');
-            const amtCetaphil = getAmt('舒特膚');
-            const amtFlora = getAmt('芙樂思');
-            const cosmeticTotal = data.stage3.total;
+            const getAmt = (key: string) => data.stage3.rows.find(r => r.categoryName.includes(key))?.subTotal || 0;
+            
+            writeToCell(config.cell_pointsStd, staffInfo?.pointsStandard || ''); 
+            writeToCell(config.cell_pointsDev, pointsDev); 
+            writeToCell(config.cell_pointsRep, pointsRep); 
+            writeToCell(config.cell_pointsTableDev, pointsTableDev); 
+            
+            writeToCell(config.cell_cosmeticStd, staffInfo?.cosmeticStandard || ''); 
+            writeToCell(config.cell_cosmeticTotal, data.stage3.total);
+            writeToCell(config.cell_amtLrp, getAmt('理膚'));
+            writeToCell(config.cell_amtCerave, getAmt('適樂膚'));
+            writeToCell(config.cell_amtDrSatin, getAmt('Dr.Satin'));
+            writeToCell(config.cell_amtCetaphil, getAmt('舒特膚'));
+            writeToCell(config.cell_amtFlora, getAmt('芙樂思'));
 
-            // C. Rewards
             let rewardCash = 0;
             let reward711 = 0;
             let rewardFamily = 0;
@@ -261,27 +245,7 @@ export const exportToExcel = async (
                 }
             });
 
-            // Points Section
-            writeToCell(config.cell_pointsStd, staffInfo?.pointsStandard || ''); 
-            writeToCell(config.cell_pointsTotal, ''); 
-            writeToCell(config.cell_pointsDev, pointsDev); 
-            writeToCell(config.cell_pointsRep, pointsRep); 
-            writeToCell(config.cell_pointsTableDev, pointsTableDev); 
-            writeToCell(config.cell_pointsMilkDev, ''); 
-
-            // Cosmetic Section
-            writeToCell(config.cell_cosmeticStd, staffInfo?.cosmeticStandard || ''); 
-            writeToCell(config.cell_cosmeticTotal, cosmeticTotal);
-            writeToCell(config.cell_amtLrp, amtLrp);
-            writeToCell(config.cell_amtCerave, amtCerave);
-            writeToCell(config.cell_amtDrSatin, amtDrSatin);
-            writeToCell(config.cell_amtCetaphil, amtCetaphil);
-            writeToCell(config.cell_amtFlora, amtFlora);
-            writeToCell(config.cell_amtEmployee, '');
-
-            // Rewards Section
             writeToCell(config.cell_rewardCash, rewardCash);
-            writeToCell(config.cell_rewardMilk, '');
             writeToCell(config.cell_reward711, reward711);
             writeToCell(config.cell_rewardFamily, rewardFamily);
             writeToCell(config.cell_rewardPx, rewardPx);
@@ -294,48 +258,28 @@ export const exportToExcel = async (
             if (!col) return;
             const cell = sheet.getCell(`${col}${currentRow}`);
             cell.value = val;
-            
             if (tmplSourceSheet) {
                const tmplRowIdx = config.startRow || 2;
                const templateCell = tmplSourceSheet.getCell(`${col}${tmplRowIdx}`);
-               if (templateCell) {
-                   applyCellStyle(cell, templateCell);
-               }
+               if (templateCell) applyCellStyle(cell, templateCell);
             }
         };
 
         // 1. Stage 1 Data (List)
         finalStage1.forEach(row => {
-            // Determine Note content based on Role and Category
-            let note: string = row.status; // Default to basic status
-
+            let note: string = row.status; 
             if (data.role === 'PHARMACIST') {
-                if (row.category === '調劑點數') {
-                    note = `${row.quantity}份`;
-                } else {
-                    // For '其他' or standard items
-                    if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) {
-                        note = row.repurchaseType;
-                    }
-                }
+                if (row.category === '調劑點數') note = `${row.quantity}份`;
+                else if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) note = row.repurchaseType;
             } else {
-                // SALES
-                if (row.category === '現金-小兒銷售') {
-                    note = `${row.quantity}罐`;
-                } else {
-                    // Standard Categories
-                    if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) {
-                        note = row.repurchaseType;
-                    }
-                }
+                if (row.category === '現金-小兒銷售') note = `${row.quantity}罐`;
+                else if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) note = row.repurchaseType;
             }
 
             let pts = 0;
-            if (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') {
-                pts = 0;
-            } else {
-                pts = recalculateStage1Points(row, data.role);
-            }
+            if (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') pts = 0;
+            else pts = recalculateStage1Points(row, data.role);
+            
             const ptsDisplay = (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') ? '' : pts;
 
             put(config.category, safeVal(row.category));
@@ -351,9 +295,7 @@ export const exportToExcel = async (
         });
 
         // Stage 2 Logic
-        // For Pharmacist in Template Mode: Use Fixed Cells if configured
         if (data.role === 'PHARMACIST') {
-            // 1. Calculate Pharmacist Point Stats
             const pointsDev = finalStage1.reduce((acc, row) => {
                 if (row.status === Stage1Status.DEVELOP || row.status === Stage1Status.HALF_YEAR || row.status === Stage1Status.RETURN) {
                     return acc + recalculateStage1Points(row, data.role);
@@ -385,12 +327,10 @@ export const exportToExcel = async (
                 });
             }
 
-            // Write Pharmacist Points
             writeToCell(config.cell_pharm_points_dev, pointsDev);
             writeToCell(config.cell_pharm_points_rep, pointsRep);
             writeToCell(config.cell_pharm_points_table_dev, pointsTableDev);
 
-            // 2. Dispensing Stats
             const qty1727 = data.stage2.find(r => r.itemID === '001727')?.quantity || 0;
             const qty1345 = data.stage2.find(r => r.itemID === '001345')?.quantity || 0;
             const bonus = Math.max(0, (qty1727 - 300) * 10);
@@ -399,20 +339,42 @@ export const exportToExcel = async (
             writeToCell(config.cell_pharm_qty_1345, qty1345);
             writeToCell(config.cell_pharm_bonus, bonus);
             
-            // DO NOT append list rows for Pharmacist in template mode
         } else {
-            // For Sales (or other), append Stage 2 list below Stage 1
-            currentRow += 2;
-            
-            const addSimpleRow = (vals: any[]) => {
-                 const r = sheet.getRow(currentRow++);
-                 r.values = vals;
-                 r.commit();
-            };
-
+            // SALES
             if (data.stage2.length > 0) {
+                 const addSimpleRow = (vals: any[]) => {
+                     const r = sheet.getRow(currentRow++);
+                     r.values = vals;
+                     r.commit();
+                 };
                  addSimpleRow(["--- 現金獎勵清單 ---"]);
                  
+                 // Add Header Row for Stage 2
+                 const headerRow = sheet.getRow(currentRow);
+                 const headers = [
+                    { key: config.reward_category || config.category, label: '分類' },
+                    { key: config.reward_date || config.date, label: '日期' },
+                    { key: config.reward_customerID || config.customerID, label: '客戶編號' },
+                    { key: config.reward_itemID || config.itemID, label: '品項編號' },
+                    { key: config.reward_itemName || config.itemName, label: '品名' },
+                    { key: config.reward_quantity || config.quantity, label: '數量' },
+                    { key: config.reward_note || 'G', label: '備註' },
+                    { key: config.reward_amount || 'H', label: '金額' }
+                 ];
+                 
+                 headers.forEach(h => {
+                     if (h.key) {
+                         const cell = headerRow.getCell(h.key);
+                         cell.value = h.label;
+                         cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+                         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } }; // Light Grey
+                         cell.alignment = { horizontal: 'center' };
+                         cell.font = { bold: true };
+                     }
+                 });
+                 headerRow.commit();
+                 currentRow++;
+
                  data.stage2.forEach(r => {
                      if (r.isDeleted) return;
                      let reward = r.format === '禮券' ? `${r.quantity}張` : `${r.customReward ?? (r.quantity * r.reward)}元`;
@@ -432,8 +394,6 @@ export const exportToExcel = async (
     } else {
         // NO TEMPLATE MODE (Fallback)
         let startRow = 1;
-        
-        // Use a slightly different start row since we merged A1 for title
         if (reportDate) startRow = 2;
 
         const addRow = (values: any[], isHeader = false, isSectionTitle = false) => {
@@ -465,28 +425,13 @@ export const exportToExcel = async (
         addRow(header, true);
 
         finalStage1.forEach(row => {
-            // Determine Note content based on Role and Category
-            let note: string = row.status; // Default to basic status
-
+            let note: string = row.status;
             if (data.role === 'PHARMACIST') {
-                if (row.category === '調劑點數') {
-                    note = `${row.quantity}份`;
-                } else {
-                    // For '其他' or standard items
-                    if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) {
-                        note = row.repurchaseType;
-                    }
-                }
+                if (row.category === '調劑點數') note = `${row.quantity}份`;
+                else if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) note = row.repurchaseType;
             } else {
-                // SALES
-                if (row.category === '現金-小兒銷售') {
-                    note = `${row.quantity}罐`;
-                } else {
-                    // Standard Categories
-                    if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) {
-                        note = row.repurchaseType;
-                    }
-                }
+                if (row.category === '現金-小兒銷售') note = `${row.quantity}罐`;
+                else if (row.status === Stage1Status.REPURCHASE && row.repurchaseType) note = row.repurchaseType;
             }
 
             const pts = (data.role !== 'PHARMACIST' && row.category === '現金-小兒銷售') ? '' : recalculateStage1Points(row, data.role);
@@ -499,7 +444,6 @@ export const exportToExcel = async (
         
         startRow++; 
 
-        // STAGE 2 & 3
         if (data.role === 'PHARMACIST') {
             addRow([`【第二階段：當月調劑件數】`], false, true);
             addRow(["品項編號", "品名", "數量"], true);
@@ -551,7 +495,6 @@ export const exportToExcel = async (
   }
 
   // --- 2. REPURCHASE SHEET (MATRIX VIEW) ---
-  // Step 1: Gather Matrix Data
   interface RepurchaseRowData extends Stage1Row {
       actualSellerPoints: number;
       devPoints: number;
@@ -574,8 +517,6 @@ export const exportToExcel = async (
               const dev = row.originalDeveloper;
               if (dev) {
                   developersSet.add(dev);
-
-                  // Calculate Points
                   let fullPoints = 0;
                   let sellerPoints = row.calculatedPoints;
                   let devPoints = 0;
@@ -587,282 +528,155 @@ export const exportToExcel = async (
                        fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, sellerData.role);
                        devPoints = fullPoints - sellerPoints;
                   }
-                  
-                  rows.push({
-                      ...row,
-                      actualSellerPoints: sellerPoints,
-                      devPoints: devPoints
-                  });
+                  rows.push({ ...row, actualSellerPoints: sellerPoints, devPoints: devPoints });
               }
           }
       });
-      
-      if (rows.length > 0) {
-          matrixData[sellerName] = rows.sort((a, b) => a.date.localeCompare(b.date));
-      }
+      if (rows.length > 0) matrixData[sellerName] = rows.sort((a, b) => a.date.localeCompare(b.date));
   }
 
-  // Create Sheet if data exists
   if (Object.keys(matrixData).length > 0) {
       const repSheet = outWorkbook.addWorksheet("回購總表");
       
-      // Sort Developers by Role -> ID -> Name
       const sortedDevs = Array.from(developersSet).sort((a, b) => {
-          // Determine Role from Processed Data if available, fallback to master list
           const roleA = processedData[a]?.role || staffMasterList.find(s => s.name === a)?.role || 'SALES';
           const roleB = processedData[b]?.role || staffMasterList.find(s => s.name === b)?.role || 'SALES';
-          
           const pA = roleA === 'SALES' ? 1 : (roleA === 'PHARMACIST' ? 2 : 3);
           const pB = roleB === 'SALES' ? 1 : (roleB === 'PHARMACIST' ? 2 : 3);
-          
           if (pA !== pB) return pA - pB;
-
-          // Compare ID
           const staffA = staffMasterList.find(s => s.name === a);
           const staffB = staffMasterList.find(s => s.name === b);
           const idA = staffA?.id || '999999';
           const idB = staffB?.id || '999999';
-
           if (idA !== idB) return idA.localeCompare(idB, undefined, { numeric: true });
-
           return a.localeCompare(b, 'zh-TW');
       });
 
-      // Define Columns Widths
-      // Base: 7 cols (A-G) + Developers
       const cols: Partial<ExcelJS.Column>[] = [
-          { width: 20 }, // Category (Seller Name header goes here)
-          { width: 12 }, // Date
-          { width: 15 }, // CustomerID
-          { width: 15 }, // ItemID
-          { width: 30 }, // ItemName
-          { width: 15 }, // Note
-          { width: 12 }, // Seller Points
+          { width: 20 }, { width: 12 }, { width: 15 }, { width: 15 }, { width: 30 }, { width: 15 }, { width: 12 }
       ];
-      // Add Dev Columns
       sortedDevs.forEach(() => cols.push({ width: 12 }));
       repSheet.columns = cols;
 
-      // --- TITLE ROW (NEW) ---
-      // If reportDate exists, insert it at row 1 and push headers down.
       if (reportDate) {
           const titleRow = repSheet.addRow([reportDate]);
-          const lastColIdx = 7 + sortedDevs.length; // A-G + Devs
-          // Merge from A1 to the last column
-          repSheet.mergeCells(titleRow.number, 1, titleRow.number, lastColIdx);
-          
+          repSheet.mergeCells(titleRow.number, 1, titleRow.number, 7 + sortedDevs.length);
           const cell = titleRow.getCell(1);
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
           cell.font = { bold: true, size: 14 };
-          // Fill background for Title (Optional, matching image style loosely)
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFBE7C6' } }; // Light Orange/Gold
-          cell.border = { top: {style:'thin'}, bottom: {style:'thin'}, left: {style:'thin'}, right: {style:'thin'} };
-          
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFBE7C6' } }; 
           titleRow.height = 30; 
       }
 
-      // --- HEADER ROWS ---
-      // Fixed Headers + "Original Developer" Merged Header
-      const headerRow1 = repSheet.addRow([
-          "分類", "日期", "客戶編號", "品項編號", "品名", "備註", "回購點數", "原開發者 (開發點數)"
-      ]);
-      
-      // Merge "Original Developer" across all dev columns
-      if (sortedDevs.length > 0) {
-          const startCol = 8; // Column H
-          const endCol = 8 + sortedDevs.length - 1;
-          if (endCol >= startCol) {
-              repSheet.mergeCells(headerRow1.number, startCol, headerRow1.number, endCol);
-          }
-      }
+      const headerRow1 = repSheet.addRow(["分類", "日期", "客戶編號", "品項編號", "品名", "備註", "回購點數", "原開發者 (開發點數)"]);
+      if (sortedDevs.length > 0) repSheet.mergeCells(headerRow1.number, 8, headerRow1.number, 8 + sortedDevs.length - 1);
 
-      // Dev Names Sub-header
-      const headerRow2Values = ["", "", "", "", "", "", ""]; // Spacers for A-G
+      const headerRow2Values = ["", "", "", "", "", "", ""]; 
       sortedDevs.forEach(dev => headerRow2Values.push(dev));
       const headerRow2 = repSheet.addRow(headerRow2Values);
 
-      // Styling Headers
       [headerRow1, headerRow2].forEach(row => {
           row.font = { bold: true };
           row.alignment = { horizontal: 'center', vertical: 'middle' };
           row.eachCell((cell, colNum) => {
-              if (colNum <= 7) {
-                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } }; // Slate-200
-              } else {
-                  // Dev header background
-                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDD6FE' } }; // Purple-100
-              }
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colNum <= 7 ? 'FFE2E8F0' : 'FFDDD6FE' } };
               cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
           });
       });
-      // Specific style for "Repurchase Points" header (Col 7) in the main header row
-      headerRow1.getCell(7).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } }; // Amber-50
-      headerRow1.getCell(7).font = { bold: true, color: { argb: 'FFB45309' } }; // Amber-700
+      headerRow1.getCell(7).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } };
+      headerRow1.getCell(7).font = { bold: true, color: { argb: 'FFB45309' } };
       
-      // --- DATA ROWS ---
       Object.keys(matrixData).sort().forEach(sellerName => {
           const rows = matrixData[sellerName];
-          // Calculate Totals for Header Row
           const totalSeller = rows.reduce((acc, r) => acc + r.actualSellerPoints, 0);
           
-          // Construct Section Header (Combined with Totals)
-          // [Seller Name (Merged A-F), TotalSeller (G), ...DevTotals (H+)]
           const sectionRowValues: any[] = [sellerName, "", "", "", "", "", totalSeller];
           sortedDevs.forEach(dev => {
               const devTotal = rows.reduce((acc, r) => r.originalDeveloper === dev ? acc + r.devPoints : acc, 0);
               sectionRowValues.push(devTotal === 0 ? '' : devTotal);
           });
 
-          // Section Header Row
           const sectionRow = repSheet.addRow(sectionRowValues);
-          
-          // Merge Name Cell (A-F = 1-6)
           repSheet.mergeCells(sectionRow.number, 1, sectionRow.number, 6);
-          
-          // Style Name Cell
           const nameCell = sectionRow.getCell(1);
-          nameCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } }; // Slate-100
+          nameCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
           nameCell.font = { bold: true, size: 12 };
           nameCell.border = { top: {style:'medium'}, bottom: {style:'medium'}, right: {style: 'thin'} };
 
-          // Style Total Cells (Starting from G=7)
           sectionRow.eachCell((cell, colNum) => {
               if (colNum >= 7) {
                   cell.font = { bold: true };
                   cell.alignment = { horizontal: 'right' };
                   cell.border = { top: {style:'medium'}, bottom: {style:'medium'} };
-                  
-                  if (colNum === 7) { // Seller Total
-                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } }; // Amber-50
+                  if (colNum === 7) { 
+                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } };
                       cell.font = { bold: true, color: { argb: 'FFB45309' } };
-                  } else { // Dev Totals
-                      if (cell.value) { // Only highlight if value > 0
-                          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } }; // Purple-50
-                          cell.font = { bold: true, color: { argb: 'FF6D28D9' } };
-                      }
+                  } else if (cell.value) { 
+                      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } };
+                      cell.font = { bold: true, color: { argb: 'FF6D28D9' } };
                   }
               }
           });
 
-          // Iterate Items
           rows.forEach(row => {
               const isReturn = row.status === Stage1Status.RETURN;
-              const textColor = isReturn ? 'FFDC2626' : 'FF000000'; // Red : Black
-
-              const rowValues = [
-                  row.category,
-                  row.date,
-                  formatCID(row.customerID),
-                  row.itemID,
-                  row.itemName,
-                  safeVal(row.repurchaseType),
-                  row.actualSellerPoints
-              ];
-
-              // Add Dev Points cells
-              sortedDevs.forEach(dev => {
-                  if (dev === row.originalDeveloper) {
-                      rowValues.push(row.devPoints);
-                  } else {
-                      rowValues.push('');
-                  }
-              });
+              const textColor = isReturn ? 'FFDC2626' : 'FF000000'; 
+              const rowValues = [row.category, row.date, formatCID(row.customerID), row.itemID, row.itemName, safeVal(row.repurchaseType), row.actualSellerPoints];
+              sortedDevs.forEach(dev => rowValues.push(dev === row.originalDeveloper ? row.devPoints : ''));
 
               const r = repSheet.addRow(rowValues);
-              
-              // Styling Row
               r.eachCell((cell, colNum) => {
                   cell.font = { color: { argb: textColor } };
                   cell.border = { bottom: { style: 'dotted', color: { argb: 'FFCBD5E1' } } };
-                  
-                  // Highlight Seller Points (Col 7)
                   if (colNum === 7) {
                       cell.font = { bold: true, color: { argb: isReturn ? 'FFDC2626' : 'FFB45309' } };
                       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } };
                   }
-                  
-                  // Highlight Target Dev Point Cell
                   if (colNum > 7) {
                        const devName = sortedDevs[colNum - 8];
                        if (devName === row.originalDeveloper) {
-                            cell.font = { bold: true, color: { argb: isReturn ? 'FFDC2626' : 'FF6D28D9' } }; // Purple-700
-                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } }; // Purple-50
+                            cell.font = { bold: true, color: { argb: isReturn ? 'FFDC2626' : 'FF6D28D9' } };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } };
                        }
                   }
               });
           });
-          
-          // Spacer Row
           repSheet.addRow([]);
       });
   }
 
   const buffer = await outWorkbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  const url = window.URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = defaultFilename.trim().replace(/\.xlsx$/i, '') + '.xlsx';
-  anchor.click();
-  window.URL.revokeObjectURL(url);
+  saveAs(blob, defaultFilename.trim().replace(/\.xlsx$/i, '') + '.xlsx');
 };
 
-// Helper: Get ARGB color from string hash
-function getStoreColorARGB(name: string): string {
-    return 'FF334155';
-}
+function getStoreColorARGB(name: string): string { return 'FF334155'; }
 
-// Helper: Copy Sheet Structure
 function copySheetModel(source: ExcelJS.Worksheet, target: ExcelJS.Worksheet, maxRow: number = 20) {
     if (source.columns) {
-        target.columns = source.columns.map(col => ({ 
-            header: col.header, key: col.key, width: col.width, style: col.style 
-        }));
+        target.columns = source.columns.map(col => ({ header: col.header, key: col.key, width: col.width, style: col.style }));
     }
-    
     target.pageSetup = { ...source.pageSetup };
-
-    if (source.properties) {
-        target.properties = JSON.parse(JSON.stringify(source.properties));
-    }
-    
-    if (source.views) {
-        target.views = JSON.parse(JSON.stringify(source.views));
-    }
+    if (source.properties) target.properties = JSON.parse(JSON.stringify(source.properties));
+    if (source.views) target.views = JSON.parse(JSON.stringify(source.views));
     
     source.eachRow({ includeEmpty: true }, (row, rowNumber) => {
         const newRow = target.getRow(rowNumber);
-        
         if (row.height) newRow.height = row.height;
         newRow.hidden = row.hidden;
-        
         row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
              const newCell = newRow.getCell(colNumber);
-             
-             // ALWAYS copy the style (font, border, fill, etc.) from the template
-             // This ensures fixed cells (e.g. at row 50) retain their bold/large formatting
              applyCellStyle(newCell, cell);
-
-             // ONLY copy the value if it's in the "Header" area (above the list start)
-             // This prevents dummy data in the template list area from appearing in the export
-             if (rowNumber < maxRow) {
-                 newCell.value = cell.value;
-             }
+             if (rowNumber < maxRow) newCell.value = cell.value;
         });
     });
 
     const model = (source as any).model;
     if (model && model.merges) {
-        (model.merges as string[]).forEach(merge => {
-            try { target.mergeCells(merge); } catch (e) {}
-        });
+        (model.merges as string[]).forEach(merge => { try { target.mergeCells(merge); } catch (e) {} });
     } else {
         const merges = (source as any)._merges;
-        if (merges) {
-            Object.keys(merges).forEach(merge => {
-                try { target.mergeCells(merge); } catch (e) {}
-            });
-        }
+        if (merges) Object.keys(merges).forEach(merge => { try { target.mergeCells(merge); } catch (e) {} });
     }
 }
 

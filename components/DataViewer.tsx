@@ -686,6 +686,8 @@ const DataViewer: React.FC<DataViewerProps> = ({
                         <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">品項編號</th>
                         <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">品名</th>
                         <th className="px-2 py-1.5 text-right text-xs font-bold uppercase border border-slate-300 bg-slate-100">Qty</th>
+                        <th className="px-2 py-1.5 text-right text-xs font-bold uppercase border border-slate-300 bg-slate-100">金額</th>
+                        <th className="px-2 py-1.5 text-right text-xs font-bold uppercase border border-slate-300 bg-slate-100">折扣比</th>
                         <th className="px-2 py-1.5 text-xs font-bold uppercase border border-slate-300 bg-slate-100">備註</th>
                         <th className="px-2 py-1.5 text-right text-xs font-bold uppercase border border-slate-300 bg-slate-100">獎勵</th>
                     </tr>
@@ -712,6 +714,8 @@ const DataViewer: React.FC<DataViewerProps> = ({
                             </td>
 
                             <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${txtCls}`}>{row.quantity}</td>
+                            <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${txtCls}`}>{row.amount}</td>
+                            <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${txtCls}`}>{row.discountRatio}</td>
                             <td className={`px-2 py-1 border border-slate-200 text-xs truncate max-w-[120px] ${txtCls}`}>{row.note}</td>
                             <td className={`px-2 py-1 border border-slate-200 text-right font-bold ${txtCls}`}>
                             {row.format === '禮券' ? 

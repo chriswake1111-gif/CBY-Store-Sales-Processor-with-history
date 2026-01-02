@@ -371,6 +371,8 @@ const processStage2Sales = (rawData: RawRow[], rewardRules: RewardRule[]): Stage
       itemID,
       itemName: getVal(row, COL_HEADERS.ITEM_NAME) || getVal(row, '品名') || '',
       quantity: qty,
+      amount: getNum(row, COL_HEADERS.SUBTOTAL), // Capture Amount
+      discountRatio: getStr(row, COL_HEADERS.DISCOUNT_RATIO), // Capture Discount Ratio
       category: rule.category,
       note: rule.note,
       reward: rule.reward,
