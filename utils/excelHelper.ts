@@ -1,4 +1,3 @@
-
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 // @ts-ignore
@@ -142,6 +141,11 @@ export const exportToExcel = async (
     const finalStage1 = data.stage1.filter(row => {
          if (row.status === Stage1Status.DELETE) return false;
          if (row.status === Stage1Status.RETURN && row.returnTarget) return false;
+         
+         // --- EXCLUSION LOGIC ---
+         // Exclude Repurchase from individual sheet list as requested
+         if (row.status === Stage1Status.REPURCHASE) return false;
+         
          return true;
     });
 
@@ -189,6 +193,7 @@ export const exportToExcel = async (
                 return acc;
             }, 0);
 
+            // Note: pointsRep will be 0 here because Repurchase rows are filtered out of finalStage1
             const pointsRep = finalStage1.reduce((acc, row) => {
                 if (row.status === Stage1Status.REPURCHASE) return acc + row.calculatedPoints;
                 return acc;
@@ -303,6 +308,7 @@ export const exportToExcel = async (
                 return acc;
             }, 0);
 
+            // pointsRep will be 0
             const pointsRep = finalStage1.reduce((acc, row) => {
                 if (row.status === Stage1Status.REPURCHASE) return acc + row.calculatedPoints;
                 return acc;
