@@ -1,3 +1,4 @@
+
 import ExcelJS from 'exceljs';
 import saveAs from 'file-saver';
 import { ProcessedData, Stage1Status, Stage1Row, StaffRecord } from '../types';
@@ -640,39 +641,115 @@ export const exportToExcel = async (
           return a.localeCompare(b, 'zh-TW');
       });
 
+      // Calculate Dev Grand Totals (Sum of Dev Points across all sellers)
+      const devGrandTotals: Record<string, number> = {};
+      sortedDevs.forEach(dev => devGrandTotals[dev] = 0);
+
+      Object.values(matrixData).forEach(rows => {
+        rows.forEach(row => {
+            if (row.originalDeveloper && devGrandTotals[row.originalDeveloper] !== undefined) {
+                devGrandTotals[row.originalDeveloper] += row.devPoints;
+            }
+        });
+      });
+
       const cols: Partial<ExcelJS.Column>[] = [
           { width: 20 }, { width: 12 }, { width: 15 }, { width: 15 }, { width: 30 }, { width: 15 }, { width: 12 }
       ];
       sortedDevs.forEach(() => cols.push({ width: 12 }));
       repSheet.columns = cols;
 
+      // Header Logic
+      // Row 1: Report Title (Merged)
+      let currentRow = 1;
       if (reportDate) {
           const titleRow = repSheet.addRow([reportDate]);
-          repSheet.mergeCells(titleRow.number, 1, titleRow.number, 7 + sortedDevs.length);
+          repSheet.mergeCells(1, 1, 1, 7 + sortedDevs.length);
           const cell = titleRow.getCell(1);
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
           cell.font = { bold: true, size: 14 };
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFBE7C6' } }; 
           titleRow.height = 30; 
+          currentRow++;
+      }
+      
+      const headerStartRow = currentRow;
+
+      // Fixed Headers List
+      const fixedHeaders = ["分類", "日期", "客戶編號", "品項編號", "品名", "備註", "回購點數"];
+
+      // Row 2 (Rel 1): Main Header for Developers "原開發者 (開發點數)"
+      // Fixed columns will be merged vertically later, so we leave them "empty" in Excel logic here or fill first one
+      const row2Vals = [...Array(7).fill(""), "原開發者 (開發點數)"];
+      const r2 = repSheet.addRow(row2Vals);
+      
+      // Row 3 (Rel 2): Employee IDs
+      const row3Vals = [...Array(7).fill("")];
+      sortedDevs.forEach(dev => {
+          const staff = staffMasterList.find(s => s.name === dev);
+          row3Vals.push(staff?.id || "");
+      });
+      const r3 = repSheet.addRow(row3Vals);
+
+      // Row 4 (Rel 3): Employee Names (And we place Fixed Headers here logically, but will merge up)
+      const row4Vals = [...fixedHeaders];
+      sortedDevs.forEach(dev => row4Vals.push(dev));
+      const r4 = repSheet.addRow(row4Vals);
+
+      // Row 5 (Rel 4): Total Dev Points
+      const row5Vals = [...Array(7).fill("")];
+      sortedDevs.forEach(dev => row5Vals.push(devGrandTotals[dev]));
+      const r5 = repSheet.addRow(row5Vals);
+
+      // --- MERGING & STYLING HEADERS ---
+
+      // 1. Merge Fixed Columns (A-G) from Row 2 to Row 5
+      // And set the value to the Fixed Header Name
+      for (let col = 1; col <= 7; col++) {
+          repSheet.mergeCells(headerStartRow, col, headerStartRow + 3, col);
+          const cell = repSheet.getCell(headerStartRow, col);
+          cell.value = fixedHeaders[col - 1]; // Set value at top-left of merge
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+          cell.font = { bold: true };
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
       }
 
-      const headerRow1 = repSheet.addRow(["分類", "日期", "客戶編號", "品項編號", "品名", "備註", "回購點數", "原開發者 (開發點數)"]);
-      if (sortedDevs.length > 0) repSheet.mergeCells(headerRow1.number, 8, headerRow1.number, 8 + sortedDevs.length - 1);
+      // 2. Merge "原開發者" Header (H2 -> End2)
+      if (sortedDevs.length > 0) {
+          repSheet.mergeCells(headerStartRow, 8, headerStartRow, 8 + sortedDevs.length - 1);
+          const mainHeader = repSheet.getCell(headerStartRow, 8);
+          mainHeader.alignment = { horizontal: 'center', vertical: 'middle' };
+          mainHeader.font = { bold: true, color: { argb: 'FFFFFFFF' } }; // White text
+          mainHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6D28D9' } }; // Purple bg
+          mainHeader.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+      }
 
-      const headerRow2Values = ["", "", "", "", "", "", ""]; 
-      sortedDevs.forEach(dev => headerRow2Values.push(dev));
-      const headerRow2 = repSheet.addRow(headerRow2Values);
-
-      [headerRow1, headerRow2].forEach(row => {
-          row.font = { bold: true };
-          row.alignment = { horizontal: 'center', vertical: 'middle' };
-          row.eachCell((cell, colNum) => {
-              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colNum <= 7 ? 'FFE2E8F0' : 'FFDDD6FE' } };
+      // 3. Style IDs, Names, Points (Cols H+, Rows 3-5)
+      for (let r = headerStartRow + 1; r <= headerStartRow + 3; r++) {
+          const row = repSheet.getRow(r);
+          for (let c = 8; c < 8 + sortedDevs.length; c++) {
+              const cell = row.getCell(c);
+              cell.alignment = { horizontal: 'center', vertical: 'middle' };
               cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
-          });
-      });
-      headerRow1.getCell(7).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } };
-      headerRow1.getCell(7).font = { bold: true, color: { argb: 'FFB45309' } };
+              
+              if (r === headerStartRow + 1) { // IDs
+                  cell.font = { bold: true, color: { argb: 'FF4B5563' } };
+                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3E8FF' } }; // Light purple
+              } else if (r === headerStartRow + 2) { // Names
+                  cell.font = { bold: true };
+                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDD6FE' } }; // Mid purple
+              } else if (r === headerStartRow + 3) { // Totals
+                  cell.font = { bold: true, color: { argb: 'FF6D28D9' } };
+                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3E8FF' } }; // Light purple
+              }
+          }
+      }
+
+      // Highlight "回購點數" Header (Col G)
+      const repPointHeader = repSheet.getCell(headerStartRow, 7);
+      repPointHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } };
+      repPointHeader.font = { bold: true, color: { argb: 'FFB45309' } };
       
       // Sort the keys (Sellers) for the matrix view
       const matrixSellers = Object.keys(matrixData).sort((a, b) => {
