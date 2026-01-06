@@ -161,7 +161,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
       return colors[Math.abs(hash) % colors.length];
   };
 
-  // New Helper: Get specialized color for staff button
   const getStaffColorClass = (name: string, isActive: boolean) => {
     if (!isActive) return 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200 hover:text-gray-600';
     
@@ -179,6 +178,22 @@ const DataViewer: React.FC<DataViewerProps> = ({
     return colors[Math.abs(hash) % colors.length];
   };
 
+  // New Helper: Get specialized color for item alias tags
+  const getAliasColorClass = (alias: string) => {
+    const colors = [
+        'bg-indigo-100 text-indigo-700 border-indigo-200',
+        'bg-amber-100 text-amber-700 border-amber-200',
+        'bg-teal-100 text-teal-700 border-teal-200',
+        'bg-rose-100 text-rose-700 border-rose-200',
+        'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200',
+        'bg-emerald-100 text-emerald-700 border-emerald-200'
+    ];
+    let hash = 0;
+    const str = String(alias || '');
+    for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    return colors[Math.abs(hash) % colors.length];
+  };
+
   const renderColorCodedDate = (dateStr: string) => {
     if (!dateStr) return null;
     const s = String(dateStr);
@@ -190,7 +205,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
     const rest = s.substring(7);
 
     return (
-        <span className="font-black font-mono tracking-tight">
+        <span className="font-black font-mono tracking-tight text-sm">
             <span className="text-slate-400">{year}</span>
             <span className="text-blue-600 bg-blue-50 px-[1px]">{month}</span>
             <span className="text-orange-600">{day}</span>
@@ -338,7 +353,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
 
       // Sort Developers using Role -> ID -> Name logic (Same as App.tsx)
       const sortedDevelopers = Array.from(developersSet).sort((a, b) => {
-          // Get Role from FullProcessedData first, fallback to Master List
           const roleA = fullProcessedData[a]?.role || staffMasterList.find(s => s.name === a)?.role || 'SALES';
           const roleB = fullProcessedData[b]?.role || staffMasterList.find(s => s.name === b)?.role || 'SALES';
           
@@ -347,7 +361,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
           
           if (pA !== pB) return pA - pB;
 
-          // Get ID
           const staffA = staffMasterList.find(s => s.name === a);
           const staffB = staffMasterList.find(s => s.name === b);
           const idA = staffA?.id || '999999';
@@ -430,9 +443,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
   return (
     <div ref={rootRef} className="flex flex-col h-full bg-white relative text-sm">
       
-      {/* Top Controls */}
       <div className="border-b border-gray-300 bg-gray-50 p-2 shrink-0 flex flex-col gap-2">
-         {/* Person Bar */}
          <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar items-center border-b border-gray-200 mb-1">
             {sortedPeople.map(person => {
               const isSelected = selectedPersons.has(person);
@@ -454,7 +465,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
             })}
          </div>
 
-         {/* Header & Tabs */}
          <div className="flex justify-between items-end">
             <div className="flex items-center gap-4">
                 <div className={`w-10 h-10 rounded border flex items-center justify-center ${theme.bgAccent} ${theme.borderAccent} ${theme.accent} shadow-sm`}>
@@ -532,7 +542,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
         </button>
       )}
 
-      {/* Content Table Area */}
       <div className="flex-1 overflow-auto bg-white border-t border-gray-300">
         
         {activeTab === 'stage1' && (
@@ -581,7 +590,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
                   
                   return (
                     <tr key={`${row.id}_${isIncoming ? 'inc' : 'own'}`} className={`group hover:bg-yellow-50 ${rowBg}`}>
-                      <td className="px-2 py-1 border border-slate-200 text-center align-top relative">
+                      <td className="px-2 py-1 border border-slate-200 text-center align-top relative text-sm">
                          {isIncoming ? (
                              <span className="text-[10px] text-red-500 font-bold flex items-center justify-center gap-1"><ArrowRightLeft size={10}/> 轉入退貨</span>
                          ) : isDispensing ? (
@@ -615,21 +624,20 @@ const DataViewer: React.FC<DataViewerProps> = ({
                              )}
                         </div>
                       </td>
-                      <td className={`px-2 py-1 border border-slate-200 ${textClass}`}>{row.category}{isIncoming && <div className="text-[9px] text-slate-400">From: {row.salesPerson}</div>}</td>
-                      <td className={`px-2 py-1 border border-slate-200 font-mono ${textClass}`}>{row.date}</td>
-                      <td className={`px-2 py-1 border border-slate-200 font-mono ${textClass}`}>{formatCID(row.customerID)}</td>
-                      <td className={`px-2 py-1 border border-slate-200 font-mono text-[11px] ${textClass} ${!isDel && !isTransferredOut ? 'font-bold' : ''}`}>{row.itemID}</td>
-                      <td className={`px-2 py-1 border border-slate-200 ${textClass}`}>{row.itemName}</td>
-                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${textClass}`}>{row.quantity}</td>
-                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${textClass}`}>{row.amount}</td>
-                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono ${textClass}`}>{row.discountRatio}</td>
-                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono font-bold ${isDel || isTransferredOut ? 'text-gray-300' : isRep ? 'text-amber-600' : isRet ? 'text-red-600' : 'text-slate-900'}`}>{isDel || isTransferredOut ? 0 : (isHiddenPoints ? '-' : row.calculatedPoints)}</td>
+                      <td className={`px-2 py-1 border border-slate-200 text-sm ${textClass}`}>{row.category}{isIncoming && <div className="text-[9px] text-slate-400">From: {row.salesPerson}</div>}</td>
+                      <td className={`px-2 py-1 border border-slate-200 font-mono text-sm ${textClass}`}>{row.date}</td>
+                      <td className={`px-2 py-1 border border-slate-200 font-mono text-sm ${textClass}`}>{formatCID(row.customerID)}</td>
+                      <td className={`px-2 py-1 border border-slate-200 font-mono text-sm ${textClass} ${!isDel && !isTransferredOut ? 'font-bold' : ''}`}>{row.itemID}</td>
+                      <td className={`px-2 py-1 border border-slate-200 text-sm ${textClass}`}>{row.itemName}</td>
+                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono text-sm ${textClass}`}>{row.quantity}</td>
+                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono text-sm ${textClass}`}>{row.amount}</td>
+                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono text-sm ${textClass}`}>{row.discountRatio}</td>
+                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono font-bold text-sm ${isDel || isTransferredOut ? 'text-gray-300' : isRep ? 'text-amber-600' : isRet ? 'text-red-600' : 'text-slate-900'}`}>{isDel || isTransferredOut ? 0 : (isHiddenPoints ? '-' : row.calculatedPoints)}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-            {/* Portals ... */}
             {popoverState && createPortal(
                 <div ref={popoverRef} className="fixed z-[100] bg-white rounded-lg shadow-xl border border-slate-200 p-3 w-64 animate-in fade-in zoom-in-95 duration-100" style={{ left: popoverState.x, top: popoverState.y }}>
                     <div className="text-xs font-bold text-gray-500 mb-2 pb-1 border-b">選擇回購狀態</div>
@@ -641,40 +649,43 @@ const DataViewer: React.FC<DataViewerProps> = ({
                 </div>, rootRef.current ? (rootRef.current.ownerDocument.body) : document.body
             )}
             {historyState && createPortal(
-                <div ref={historyRef} className="fixed z-[100] bg-white rounded-lg shadow-xl border border-slate-200 w-80 overflow-hidden animate-in fade-in zoom-in-95 duration-100 flex flex-col max-h-[300px]" style={{ left: historyState.x, top: historyState.y }}>
-                    <div className="bg-slate-100 px-3 py-2 border-b border-gray-200 flex items-center justify-between shrink-0">
-                        <div className="flex flex-col"><span className="text-xs font-bold text-slate-700 flex items-center gap-1"><History size={12} className="text-blue-500"/> {historyState.mode === 'dev' ? '選擇原開發者' : '選擇原銷售者(轉出)'}</span><span className="text-[10px] text-gray-400 font-mono">{historyState.targetItemId}</span></div>
-                        <button onClick={() => handlePersonSelect(historyState.mode === 'dev' ? '無' : '')} className="text-[10px] px-2 py-1 bg-white border border-gray-300 text-gray-500 hover:text-red-600 hover:border-red-300 rounded transition-colors flex items-center gap-1"><XCircle size={10}/> {historyState.mode === 'dev' ? '設為無' : '取消轉出'}</button>
+                <div ref={historyRef} className="fixed z-[100] bg-white rounded-xl shadow-2xl border border-slate-200 w-[400px] overflow-hidden animate-in fade-in zoom-in-95 duration-100 flex flex-col max-h-[450px]" style={{ left: historyState.x, top: historyState.y }}>
+                    <div className="bg-slate-100 px-4 py-3 border-b border-gray-200 flex items-center justify-between shrink-0">
+                        <div className="flex flex-col"><span className="text-sm font-bold text-slate-700 flex items-center gap-1.5"><History size={16} className="text-blue-500"/> {historyState.mode === 'dev' ? '選擇原開發者' : '選擇原銷售者(轉出)'}</span><span className="text-xs text-gray-400 font-mono mt-0.5">{historyState.targetItemId}</span></div>
+                        <button onClick={() => handlePersonSelect(historyState.mode === 'dev' ? '無' : '')} className="text-xs px-3 py-1.5 bg-white border border-gray-300 text-gray-500 hover:text-red-600 hover:border-red-300 rounded-lg transition-colors flex items-center gap-1.5 font-bold shadow-sm"><XCircle size={14}/> {historyState.mode === 'dev' ? '設為無' : '取消轉出'}</button>
                     </div>
                     <div className="overflow-y-auto flex-1 p-0 bg-white">
-                        {historyState.loading ? <div className="p-4 flex justify-center text-blue-500"><Loader2 className="animate-spin" size={20}/></div> : historyState.records.length === 0 ? <div className="p-4 text-center"><div className="text-xs text-gray-400 mb-2">查無購買紀錄</div><div className="text-[10px] text-gray-300">請確認是否已匯入歷史資料</div></div> : (
+                        {historyState.loading ? <div className="p-8 flex justify-center text-blue-500"><Loader2 className="animate-spin" size={28}/></div> : historyState.records.length === 0 ? <div className="p-8 text-center"><div className="text-sm text-gray-400 mb-2">查無購買紀錄</div><div className="text-xs text-gray-300">請確認是否已匯入歷史資料</div></div> : (
                             <div className="divide-y divide-gray-100">
                                 {historyState.records.map((rec, idx) => {
                                     const isActive = rec.salesPerson && allActiveStaff.includes(rec.salesPerson);
                                     const staffStyle = getStaffColorClass(rec.salesPerson || '', !!isActive);
+                                    const aliasStyle = getAliasColorClass(rec.displayAlias || '一般');
                                     
                                     return (
-                                        <div key={idx} className="px-3 py-2 hover:bg-blue-50/50 flex items-center justify-between text-xs font-mono group">
-                                            <div className="flex items-center text-slate-600">
-                                                <span className="flex items-center">
+                                        <div key={idx} className="px-4 py-3 hover:bg-blue-50/50 flex items-center justify-between text-sm font-mono group transition-colors">
+                                            <div className="flex items-center text-slate-600 gap-2">
+                                                <span className="flex items-center min-w-[70px]">
                                                     {renderColorCodedDate(rec.date)}
                                                 </span>
-                                                {rec.displayAlias && <span className="ml-1 text-[10px] text-blue-600 font-bold bg-blue-50 px-1 rounded border border-blue-100">{rec.displayAlias}</span>}
-                                                <span className="w-2 inline-block"></span>
-                                                <span className="font-bold text-slate-800 text-center">{rec.quantity || '-'}</span>
-                                                {rec.unit && <span className={`text-[10px] ml-0.5 ${getUnitStyle(rec.unit)}`}>{rec.unit}</span>}
-                                                <span className="w-2 inline-block"></span>
-                                                <span className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${getStoreColorClass(rec.storeName || '')}`}>{(rec.storeName || '未知').substring(0, 2)}</span>
-                                                <span className="text-[10px] text-black font-mono ml-1">(${rec.price || 0})</span>
+                                                {rec.displayAlias && (
+                                                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded border shadow-sm shrink-0 ${aliasStyle}`}>
+                                                        {rec.displayAlias}
+                                                    </span>
+                                                )}
+                                                <span className="font-bold text-slate-800 text-center min-w-[20px] ml-1">{rec.quantity || '-'}</span>
+                                                {rec.unit && <span className={`text-xs ${getUnitStyle(rec.unit)}`}>{rec.unit}</span>}
+                                                <span className={`text-xs px-2 py-0.5 rounded border whitespace-nowrap shadow-sm ml-1 ${getStoreColorClass(rec.storeName || '')}`}>{(rec.storeName || '未知').substring(0, 2)}</span>
+                                                <span className="text-xs text-black font-black ml-1">(${rec.price || 0})</span>
                                             </div>
                                             <button 
                                                 onClick={() => rec.salesPerson && handlePersonSelect(rec.salesPerson)} 
                                                 disabled={!rec.salesPerson} 
-                                                className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap transition-all flex items-center gap-1 ${staffStyle} ${!rec.salesPerson ? 'cursor-default' : 'hover:shadow-sm cursor-pointer'}`} 
-                                                title={isActive ? "點擊選取" : "已離職或現職人員"}
+                                                className={`text-xs px-3 py-1 rounded-lg border whitespace-nowrap transition-all flex items-center gap-1.5 font-bold shadow-sm ${staffStyle} ${!rec.salesPerson ? 'cursor-default' : 'hover:scale-105 cursor-pointer active:scale-95'}`} 
+                                                title={isActive ? "點擊選取" : "已離職或非現職人員"}
                                             >
                                                 {rec.salesPerson || '無'}
-                                                {rec.salesPerson && <UserPlus size={8} className="opacity-0 group-hover:opacity-100 transition-opacity"/>}
+                                                {rec.salesPerson && <UserPlus size={12} className="opacity-0 group-hover:opacity-100 transition-opacity"/>}
                                             </button>
                                         </div>
                                     );
@@ -682,13 +693,12 @@ const DataViewer: React.FC<DataViewerProps> = ({
                             </div>
                         )}
                     </div>
-                     <div className="p-1 bg-gray-50 text-[9px] text-gray-400 text-center border-t border-gray-100">點擊名字即可帶入</div>
+                     <div className="p-2 bg-gray-50 text-[10px] text-gray-400 text-center border-t border-gray-100 font-bold tracking-wider">點擊右側名字即可自動帶入</div>
                 </div>, rootRef.current ? (rootRef.current.ownerDocument.body) : document.body
             )}
           </>
         )}
 
-        {/* ... (Stage 2 & 3) ... */}
         {activeTab === 'stage2' && (
           isPharm ? (
             <div className="flex flex-col h-full">
