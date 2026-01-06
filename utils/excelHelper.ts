@@ -568,37 +568,60 @@ export const exportToExcel = async (
   const matrixData: Record<string, RepurchaseRowData[]> = {};
   const developersSet = new Set<string>();
 
-  for (const sellerName of sortedPersons) {
-      if (!selectedPersons.has(sellerName)) continue;
+  // Process ALL data to find effective sellers
+  // Iterate through all people in processedData (Source of record)
+  Object.keys(processedData).forEach(sourcePerson => {
+      const sourceData = processedData[sourcePerson];
 
-      const sellerData = processedData[sellerName];
-      const rows: RepurchaseRowData[] = [];
+      sourceData.stage1.forEach(row => {
+          // 1. Determine Effective Seller (Who owns this row in the matrix?)
+          // If returnTarget is set, they own it. Otherwise, the source person owns it.
+          let effectiveSeller = sourcePerson;
+          if (row.status === Stage1Status.RETURN && row.returnTarget) {
+              effectiveSeller = row.returnTarget;
+          }
 
-      sellerData.stage1.forEach(row => {
+          // 2. Check if this row should appear in the Matrix
           const isRepurchase = row.status === Stage1Status.REPURCHASE;
           const isReturnSplit = row.status === Stage1Status.RETURN && row.originalDeveloper && row.originalDeveloper !== '無';
-          
+
           if (isRepurchase || isReturnSplit) {
               const dev = row.originalDeveloper;
               if (dev) {
                   developersSet.add(dev);
-                  let fullPoints = 0;
-                  let sellerPoints = row.calculatedPoints;
+                  
+                  // Initialize array for this seller if not exists
+                  if (!matrixData[effectiveSeller]) matrixData[effectiveSeller] = [];
+
+                  // Calculate Points
+                  let sellerPoints = row.calculatedPoints; 
                   let devPoints = 0;
 
                   if (isReturnSplit) {
-                       fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, sellerData.role);
+                       // Return Split: Total deduction is calculated as if no developer (full hit), 
+                       // then we subtract the seller's share (half) to find dev's share.
+                       const fullPoints = recalculateStage1Points({ ...row, originalDeveloper: undefined }, sourceData.role);
                        devPoints = fullPoints - sellerPoints;
                   } else {
-                       fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, sellerData.role);
+                       // Repurchase: Full points (Develop status) minus Seller's share (Repurchase status)
+                       const fullPoints = recalculateStage1Points({ ...row, status: Stage1Status.DEVELOP }, sourceData.role);
                        devPoints = fullPoints - sellerPoints;
                   }
-                  rows.push({ ...row, actualSellerPoints: sellerPoints, devPoints: devPoints });
+
+                  // Push to Matrix
+                  matrixData[effectiveSeller].push({ 
+                      ...row, 
+                      salesPerson: effectiveSeller, // Update owner name for consistency
+                      actualSellerPoints: sellerPoints, 
+                      devPoints: devPoints 
+                  });
               }
           }
       });
-      if (rows.length > 0) matrixData[sellerName] = rows.sort((a, b) => a.date.localeCompare(b.date));
-  }
+  });
+
+  // Sort Matrix Data Rows by Date
+  Object.values(matrixData).forEach(rows => rows.sort((a, b) => a.date.localeCompare(b.date)));
 
   if (Object.keys(matrixData).length > 0) {
       const repSheet = outWorkbook.addWorksheet("回購總表");
@@ -651,7 +674,23 @@ export const exportToExcel = async (
       headerRow1.getCell(7).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7ED' } };
       headerRow1.getCell(7).font = { bold: true, color: { argb: 'FFB45309' } };
       
-      sortedPersons.forEach(sellerName => {
+      // Sort the keys (Sellers) for the matrix view
+      const matrixSellers = Object.keys(matrixData).sort((a, b) => {
+          // Re-use the person sorter logic
+          const roleA = processedData[a]?.role || staffMasterList.find(s => s.name === a)?.role || 'SALES';
+          const roleB = processedData[b]?.role || staffMasterList.find(s => s.name === b)?.role || 'SALES';
+          const pA = roleA === 'SALES' ? 1 : (roleA === 'PHARMACIST' ? 2 : 3);
+          const pB = roleB === 'SALES' ? 1 : (roleB === 'PHARMACIST' ? 2 : 3);
+          if (pA !== pB) return pA - pB;
+          const staffA = staffMasterList.find(s => s.name === a);
+          const staffB = staffMasterList.find(s => s.name === b);
+          const idA = staffA?.id || '999999';
+          const idB = staffB?.id || '999999';
+          if (idA !== idB) return idA.localeCompare(idB, undefined, { numeric: true });
+          return a.localeCompare(b, 'zh-TW');
+      });
+
+      matrixSellers.forEach(sellerName => {
           const rows = matrixData[sellerName];
           if (!rows) return;
           const totalSeller = rows.reduce((acc, r) => acc + r.actualSellerPoints, 0);
