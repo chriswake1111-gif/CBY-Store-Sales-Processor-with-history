@@ -186,8 +186,8 @@ export const exportToExcel = async (
          // 關鍵修改：個人分頁完全排除回購資料
          if (row.status === Stage1Status.REPURCHASE) return false;
          
-         // 排除已轉出的退貨 (保留留在原銷售者身上的退貨扣項)
-         if (row.status === Stage1Status.RETURN && row.returnTarget) return false;
+         // 排除已轉出的退貨，但如果轉出對象是「自己」，則保留 (視為單純的分類修正)
+         if (row.status === Stage1Status.RETURN && row.returnTarget && row.returnTarget !== person) return false;
          
          return true;
     });

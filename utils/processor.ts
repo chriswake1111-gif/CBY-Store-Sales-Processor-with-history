@@ -274,6 +274,9 @@ export const sortStage1 = (rows: Stage1Row[]): Stage1Row[] => {
 export const recalculateStage1Points = (row: Stage1Row, role: StaffRole = 'SALES'): number => {
   if (row.status === Stage1Status.DELETE) return 0;
 
+  // PRIORITY FIX: Ensure Cash-Pediatric Sales is ALWAYS 0, regardless of Return status
+  if (role !== 'PHARMACIST' && row.category === '現金-小兒銷售') return 0;
+
   let base = row.originalPoints;
   if (base === undefined || base === null) {
       base = Number(row.raw?.[COL_HEADERS.POINTS] || row.raw?.['點數'] || 0);
@@ -317,8 +320,6 @@ export const recalculateStage1Points = (row: Stage1Row, role: StaffRole = 'SALES
     return base;
   }
   
-  if (row.category === '現金-小兒銷售') return 0;
-
   const isDividedByQty = row.category === '成人奶粉' || row.category === '成人奶水' || row.category === '嬰幼兒米麥精';
   
   if (isDividedByQty) {
