@@ -21,6 +21,10 @@ export interface Stage1Row {
   id: string; salesPerson: string; date: string; customerID: string; customerName: string;
   itemID: string; itemName: string; quantity: number; originalPoints: number; calculatedPoints: number;
   amount: number; discountRatio: string;
+  
+  // New: Manual Override for Points
+  manualPoints?: number;
+
   // New Fields for Repurchase Logic
   originalDeveloper?: string; 
   repurchaseType?: string;

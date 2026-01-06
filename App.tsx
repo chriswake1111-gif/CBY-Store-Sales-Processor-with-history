@@ -339,6 +339,22 @@ const App: React.FC = () => {
       });
   };
 
+  const handleUpdateStage1ManualPoint = (id: string, val: string) => {
+      if (!activePerson) return;
+      setPersonData(activePerson, (data) => {
+        const updatedStage1 = data.stage1.map(row => {
+           if (row.id !== id) return row;
+           // Convert empty string to undefined (restoring auto-calc)
+           const numVal = val === '' ? undefined : Number(val);
+           const updated = { ...row, manualPoints: numVal };
+           // Recalculate using new manual value (or fallback to auto if undefined)
+           updated.calculatedPoints = recalculateStage1Points(updated, data.role);
+           return updated;
+        });
+        return { ...data, stage1: updatedStage1 };
+      });
+  };
+
   const handleToggleDeleteStage2 = (id: string) => {
     if (!activePerson) return;
     setPersonData(activePerson, (data) => ({
@@ -415,7 +431,7 @@ const App: React.FC = () => {
     sortedPeople, selectedPersons, togglePersonSelection: (p: string, e: any) => { e.stopPropagation(); const s = new Set(selectedPersons); s.has(p) ? s.delete(p) : s.add(p); setSelectedPersons(s); },
     activePerson, setActivePerson, currentData, activeTab, setActiveTab, stage1TotalPoints,
     handleStatusChangeStage1, handleToggleDeleteStage2, handleUpdateStage2CustomReward, onClose: isPopOut ? () => setIsPopOut(false) : undefined,
-    handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord: activeStaffRecord,
+    handleUpdateStage1Action2, handleUpdateStage1ManualPoint, repurchaseOptions, allActiveStaff, staffRecord: activeStaffRecord,
     fullProcessedData: processedData,
     reportDate,
     staffMasterList 

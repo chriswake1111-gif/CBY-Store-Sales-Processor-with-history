@@ -21,6 +21,7 @@ interface DataViewerProps {
   handleToggleDeleteStage2: (id: string) => void;
   handleUpdateStage2CustomReward: (id: string, val: string) => void;
   handleUpdateStage1Action2: (id: string, field: 'originalDeveloper' | 'repurchaseType' | 'returnTarget', val: string) => void;
+  handleUpdateStage1ManualPoint: (id: string, val: string) => void; // New Prop
   repurchaseOptions: RepurchaseOption[];
   allActiveStaff: string[];
   staffRecord?: StaffRecord;
@@ -43,7 +44,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
   sortedPeople, selectedPersons, togglePersonSelection, activePerson, setActivePerson,
   currentData, activeTab, setActiveTab, stage1TotalPoints,
   handleStatusChangeStage1, handleToggleDeleteStage2, handleUpdateStage2CustomReward,
-  handleUpdateStage1Action2, repurchaseOptions, allActiveStaff, staffRecord, fullProcessedData, reportDate,
+  handleUpdateStage1Action2, handleUpdateStage1ManualPoint, repurchaseOptions, allActiveStaff, staffRecord, fullProcessedData, reportDate,
   staffMasterList = [],
   onClose
 }) => {
@@ -604,6 +605,16 @@ const DataViewer: React.FC<DataViewerProps> = ({
                   else if (isTransferredOut) textClass = 'text-gray-400 line-through';
                   else if (isIncoming) textClass = 'text-slate-600 italic';
                   
+                  // Points Display Logic
+                  const isManual = row.manualPoints !== undefined && row.manualPoints !== null;
+                  let pointsDisplay = isDel || isTransferredOut ? 0 : (isHiddenPoints && !isManual ? '-' : row.calculatedPoints);
+                  let pointsClass = 'text-slate-900';
+                  
+                  if (isDel || isTransferredOut) pointsClass = 'text-gray-300';
+                  else if (isManual) pointsClass = 'text-purple-700 font-black'; // Manual Override Style
+                  else if (isRep) pointsClass = 'text-amber-600';
+                  else if (isRet) pointsClass = 'text-red-600';
+
                   return (
                     <tr key={`${row.id}_${isIncoming ? 'inc' : 'own'}`} className={`group hover:bg-yellow-50 ${rowBg}`}>
                       <td className="px-2 py-1 border border-slate-200 text-center align-top relative text-sm">
@@ -648,7 +659,19 @@ const DataViewer: React.FC<DataViewerProps> = ({
                       <td className={`px-2 py-1 border border-slate-200 text-right font-mono text-sm ${textClass}`}>{row.quantity}</td>
                       <td className={`px-2 py-1 border border-slate-200 text-right font-mono text-sm ${textClass}`}>{row.amount}</td>
                       <td className={`px-2 py-1 border border-slate-200 text-right font-mono text-sm ${textClass}`}>{row.discountRatio}</td>
-                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono font-bold text-sm ${isDel || isTransferredOut ? 'text-gray-300' : isRep ? 'text-amber-600' : isRet ? 'text-red-600' : 'text-slate-900'}`}>{isDel || isTransferredOut ? 0 : (isHiddenPoints ? '-' : row.calculatedPoints)}</td>
+                      <td className={`px-2 py-1 border border-slate-200 text-right font-mono font-bold text-sm ${pointsClass}`}>
+                          {isDel || isTransferredOut || isIncoming ? (
+                              pointsDisplay
+                          ) : (
+                              <input 
+                                  type="number"
+                                  value={isManual ? row.manualPoints : (pointsDisplay === '-' ? '' : pointsDisplay)}
+                                  onChange={(e) => handleUpdateStage1ManualPoint(row.id, e.target.value)}
+                                  placeholder={pointsDisplay === '-' ? '-' : ''}
+                                  className={`w-16 text-right bg-transparent outline-none border-b border-transparent focus:border-blue-500 p-0 ${pointsClass}`}
+                              />
+                          )}
+                      </td>
                     </tr>
                   );
                 })}

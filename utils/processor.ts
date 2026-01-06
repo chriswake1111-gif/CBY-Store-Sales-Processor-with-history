@@ -272,7 +272,15 @@ export const sortStage1 = (rows: Stage1Row[]): Stage1Row[] => {
 };
 
 export const recalculateStage1Points = (row: Stage1Row, role: StaffRole = 'SALES'): number => {
+  // 1. If Deleted, always 0
   if (row.status === Stage1Status.DELETE) return 0;
+
+  // 2. Manual Override (New Logic)
+  // If user has manually edited points, return that value immediately.
+  // This takes precedence over all other logic below.
+  if (row.manualPoints !== undefined && row.manualPoints !== null && !isNaN(row.manualPoints)) {
+      return row.manualPoints;
+  }
 
   // PRIORITY FIX: Ensure Cash-Pediatric Sales is ALWAYS 0, regardless of Return status
   if (role !== 'PHARMACIST' && row.category === '現金-小兒銷售') return 0;
