@@ -1,4 +1,5 @@
 
+// Add missing React import to fix namespace and identifier errors
 import React, { useMemo, useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { ProcessedData, Stage1Status, RepurchaseOption, StaffRecord, Stage1Row } from '../types';
 import { Trash2, RotateCcw, CheckSquare, Square, Minimize2, User, Pill, Coins, Package, ChevronDown, ListPlus, History, Loader2, UserPlus, XCircle, Target, TrendingUp, Undo2, ArrowRightLeft, ArrowUp, ArrowDown, ArrowUpDown, RefreshCcw, Calendar } from 'lucide-react';
@@ -158,6 +159,52 @@ const DataViewer: React.FC<DataViewerProps> = ({
       const str = String(name || '');
       for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
       return colors[Math.abs(hash) % colors.length];
+  };
+
+  // New Helper: Get specialized color for staff button
+  const getStaffColorClass = (name: string, isActive: boolean) => {
+    if (!isActive) return 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200 hover:text-gray-600';
+    
+    const colors = [
+        'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
+        'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100',
+        'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100',
+        'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100',
+        'bg-pink-50 text-pink-700 border-pink-200 hover:bg-pink-100',
+        'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+    ];
+    let hash = 0;
+    const str = String(name || '');
+    for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    return colors[Math.abs(hash) % colors.length];
+  };
+
+  const renderColorCodedDate = (dateStr: string) => {
+    if (!dateStr) return null;
+    const s = String(dateStr);
+    if (s.length < 7) return <span className="text-red-600 font-bold">{s}</span>;
+    
+    const year = s.substring(0, 3);
+    const month = s.substring(3, 5);
+    const day = s.substring(5, 7);
+    const rest = s.substring(7);
+
+    return (
+        <span className="font-black font-mono tracking-tight">
+            <span className="text-slate-400">{year}</span>
+            <span className="text-blue-600 bg-blue-50 px-[1px]">{month}</span>
+            <span className="text-orange-600">{day}</span>
+            {rest && <span className="text-slate-300 font-normal">{rest}</span>}
+        </span>
+    );
+  };
+
+  const getUnitStyle = (unit: string) => {
+    const u = unit || '';
+    if (u.includes('罐')) return 'text-indigo-900 font-black';
+    if (u.includes('盒')) return 'text-emerald-900 font-black';
+    if (u.includes('份')) return 'text-purple-900 font-black';
+    return 'text-slate-700 font-bold';
   };
 
   const stage2Totals = useMemo(() => {
@@ -604,19 +651,31 @@ const DataViewer: React.FC<DataViewerProps> = ({
                             <div className="divide-y divide-gray-100">
                                 {historyState.records.map((rec, idx) => {
                                     const isActive = rec.salesPerson && allActiveStaff.includes(rec.salesPerson);
+                                    const staffStyle = getStaffColorClass(rec.salesPerson || '', !!isActive);
+                                    
                                     return (
                                         <div key={idx} className="px-3 py-2 hover:bg-blue-50/50 flex items-center justify-between text-xs font-mono group">
                                             <div className="flex items-center text-slate-600">
-                                                <span className="text-red-600 font-bold">{rec.date}</span>
+                                                <span className="flex items-center">
+                                                    {renderColorCodedDate(rec.date)}
+                                                </span>
                                                 {rec.displayAlias && <span className="ml-1 text-[10px] text-blue-600 font-bold bg-blue-50 px-1 rounded border border-blue-100">{rec.displayAlias}</span>}
                                                 <span className="w-2 inline-block"></span>
                                                 <span className="font-bold text-slate-800 text-center">{rec.quantity || '-'}</span>
-                                                {rec.unit && <span className="text-[10px] text-gray-400 ml-0.5">{rec.unit}</span>}
+                                                {rec.unit && <span className={`text-[10px] ml-0.5 ${getUnitStyle(rec.unit)}`}>{rec.unit}</span>}
                                                 <span className="w-2 inline-block"></span>
                                                 <span className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${getStoreColorClass(rec.storeName || '')}`}>{(rec.storeName || '未知').substring(0, 2)}</span>
                                                 <span className="text-[10px] text-black font-mono ml-1">(${rec.price || 0})</span>
                                             </div>
-                                            <button onClick={() => rec.salesPerson && handlePersonSelect(rec.salesPerson)} disabled={!rec.salesPerson} className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap transition-all flex items-center gap-1 ${!rec.salesPerson ? 'bg-gray-50 text-gray-300 border-transparent cursor-default' : isActive ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 hover:border-purple-300 hover:shadow-sm cursor-pointer' : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200 hover:text-gray-600 cursor-pointer'}`} title={isActive ? "點擊選取" : "已離職或非現職人員"}>{rec.salesPerson || '無'}{rec.salesPerson && <UserPlus size={8} className="opacity-0 group-hover:opacity-100 transition-opacity"/>}</button>
+                                            <button 
+                                                onClick={() => rec.salesPerson && handlePersonSelect(rec.salesPerson)} 
+                                                disabled={!rec.salesPerson} 
+                                                className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap transition-all flex items-center gap-1 ${staffStyle} ${!rec.salesPerson ? 'cursor-default' : 'hover:shadow-sm cursor-pointer'}`} 
+                                                title={isActive ? "點擊選取" : "已離職或現職人員"}
+                                            >
+                                                {rec.salesPerson || '無'}
+                                                {rec.salesPerson && <UserPlus size={8} className="opacity-0 group-hover:opacity-100 transition-opacity"/>}
+                                            </button>
                                         </div>
                                     );
                                 })}
@@ -629,9 +688,8 @@ const DataViewer: React.FC<DataViewerProps> = ({
           </>
         )}
 
-        {/* ... (Stage 2 & 3 - Unchanged) ... */}
+        {/* ... (Stage 2 & 3) ... */}
         {activeTab === 'stage2' && (
-          // ... (Stage 2 implementation unchanged) ...
           isPharm ? (
             <div className="flex flex-col h-full">
               <div className="bg-white px-4 py-3 border-b border-gray-300 shadow-sm shrink-0">
@@ -739,7 +797,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
           )
         )}
 
-        {/* ... (Stage 3) ... */}
         {activeTab === 'stage3' && !isPharm && (
           <div className="p-4 flex justify-center h-full items-start bg-slate-50">
              <div className="border border-slate-300 bg-white w-full max-w-lg shadow-sm">
@@ -768,7 +825,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
           </div>
         )}
 
-        {/* --- REPURCHASE MATRIX (Updated) --- */}
         {activeTab === 'repurchase' && (
           <div className="flex flex-col h-full bg-slate-50">
              <div className="flex-1 overflow-auto p-4">
@@ -799,7 +855,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
                             </thead>
                             <tbody>
                                 {Object.entries(repurchaseMatrix.dataBySeller).map(([seller, rows]: [string, RepurchaseRowData[]]) => {
-                                    // Calculate Section Totals
                                     const sellerTotal = rows.reduce((acc, r) => acc + r.actualSellerPoints, 0);
                                     const devTotals = repurchaseMatrix.developers.map(dev => 
                                         rows.reduce((acc, r) => r.originalDeveloper === dev ? acc + r.devPoints : acc, 0)
@@ -807,7 +862,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
 
                                     return (
                                         <React.Fragment key={seller}>
-                                            {/* Section Header */}
                                             <tr className="bg-slate-50 font-bold border-t-2 border-slate-300 sticky z-10">
                                                 <td className="p-2 border-r border-slate-300 sticky left-0 bg-slate-100 z-10 text-slate-800 shadow-md">{seller}</td>
                                                 <td colSpan={5} className="p-2 border-r border-slate-300 text-right text-slate-500 text-[10px] uppercase tracking-wider bg-slate-50">Subtotal</td>
@@ -818,7 +872,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
                                                     </td>
                                                 ))}
                                             </tr>
-                                            {/* Rows */}
                                             {rows.map((row, rIdx) => {
                                                 const isReturn = row.status === Stage1Status.RETURN;
                                                 return (
