@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { RawRow, ExclusionItem, RewardRule, ProcessedData, Stage1Status, StaffRole, Stage3Summary, RepurchaseOption, StaffRecord } from './types';
 import { readExcelFile, exportToExcel } from './utils/excelHelper';
 import { processStage1, processStage2, processStage3, recalculateStage1Points, generateEmptyStage3Rows, determineCategory, sortStage1 } from './utils/processor';
-import { saveToLocal, loadFromLocal, checkSavedData } from './utils/storage';
+import { saveToLocal, loadFromLocal, checkSavedData, AppState } from './utils/storage';
 import { seedDefaultStores, preloadHistoryForCustomers } from './utils/db'; 
 import FileUploader from './components/FileUploader';
 import PopoutWindow from './components/PopoutWindow';
@@ -15,6 +15,7 @@ import ExportSettingsModal from './components/ExportSettingsModal';
 import RepurchaseSettingsModal from './components/RepurchaseSettingsModal'; 
 import StaffManagerModal from './components/StaffManagerModal'; 
 import ProductGroupModal from './components/ProductGroupModal';
+import SessionManagerModal from './components/SessionManagerModal';
 import { Download, Maximize2, AlertCircle, RefreshCcw, Save, FolderOpen, Activity, FileSpreadsheet, HelpCircle, Database, Loader2, Settings, Users, ClipboardList, Layers, ChevronUp, ChevronDown } from 'lucide-react';
 import { COL_HEADERS } from './constants';
 
@@ -72,6 +73,7 @@ const App: React.FC = () => {
   const [showRepurchaseSettings, setShowRepurchaseSettings] = useState(false); 
   const [showStaffManager, setShowStaffManager] = useState(false); 
   const [showProductGroups, setShowProductGroups] = useState(false);
+  const [sessionModal, setSessionModal] = useState<{ isOpen: boolean, mode: 'SAVE' | 'LOAD' }>({ isOpen: false, mode: 'SAVE' });
 
   const [lastSaveTime, setLastSaveTime] = useState<number | null>(null);
   const [hasSavedData, setHasSavedData] = useState<boolean>(false);
@@ -79,21 +81,42 @@ const App: React.FC = () => {
   // UI State
   const [isImportCollapsed, setIsImportCollapsed] = useState(false);
   
-  const stateRef = useRef({ exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList, reportDate });
+  // Current Store Context
+  const [currentStoreName, setCurrentStoreName] = useState<string>('');
+
+  const stateRef = useRef<Omit<AppState, 'timestamp' | 'selectedPersons'> & { selectedPersons: Set<string> }>({ 
+      exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList, reportDate 
+  });
 
   useEffect(() => {
     seedDefaultStores();
+    // Auto-load simple persistence for crash recovery if exists
     const ts = checkSavedData();
-    if (ts) { setHasSavedData(true); setLastSaveTime(ts); }
-    const saved = loadFromLocal();
-    if (saved) {
-        if(saved.repurchaseOptions) setRepurchaseOptions(saved.repurchaseOptions);
-        if(saved.staffMasterList) setStaffMasterList(saved.staffMasterList);
+    if (ts) { 
+        // We don't necessarily load it, just indicate it exists.
+        // Or we could auto-load last state. Let's stick to manual load for branch safety.
+        setHasSavedData(true);
+        // Load settings regardless of session
+        const saved = loadFromLocal();
+        if (saved) {
+            if(saved.repurchaseOptions) setRepurchaseOptions(saved.repurchaseOptions);
+            if(saved.staffMasterList) setStaffMasterList(saved.staffMasterList);
+        }
     }
   }, []);
 
   useEffect(() => {
     stateRef.current = { exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList, reportDate };
+    
+    // Auto-save logic for crash recovery (single slot) - Debounced
+    const timer = setTimeout(() => {
+        if (rawSalesData.length > 0) {
+            const ts = saveToLocal(stateRef.current);
+            if (ts) setLastSaveTime(ts);
+        }
+    }, 2000);
+    return () => clearTimeout(timer);
+
   }, [exclusionList, rewardRules, rawSalesData, processedData, activePerson, selectedPersons, staffRoles, repurchaseOptions, staffMasterList, reportDate]);
 
   // Auto-collapse logic when data is loaded
@@ -120,21 +143,15 @@ const App: React.FC = () => {
     }
   };
 
-  const handleManualSave = () => {
-    const ts = saveToLocal(stateRef.current);
-    if (ts) {
-        setLastSaveTime(ts);
-        setHasSavedData(true);
-        alert(`已儲存進度 (${new Date(ts).toLocaleTimeString()})`);
-    } else {
-        alert("儲存失敗");
-    }
+  const handleOpenSaveModal = () => {
+      setSessionModal({ isOpen: true, mode: 'SAVE' });
   };
 
-  const handleLoadSave = () => {
-    const saved = loadFromLocal();
-    if (saved) {
-      if (rawSalesData.length > 0 && !window.confirm("讀取存檔將覆蓋目前資料，確定要讀取嗎？")) return;
+  const handleOpenLoadModal = () => {
+      setSessionModal({ isOpen: true, mode: 'LOAD' });
+  };
+
+  const handleRestoreSession = (saved: AppState) => {
       setExclusionList(saved.exclusionList); setRewardRules(saved.rewardRules);
       setRawSalesData(saved.rawSalesData); setProcessedData(saved.processedData);
       setActivePerson(saved.activePerson); setSelectedPersons(new Set(saved.selectedPersons));
@@ -142,10 +159,8 @@ const App: React.FC = () => {
       setRepurchaseOptions(saved.repurchaseOptions || DEFAULT_REPURCHASE_OPTIONS);
       setStaffMasterList(saved.staffMasterList || []);
       setReportDate(saved.reportDate || '');
-      setLastSaveTime(saved.timestamp);
-      setHasSavedData(true);
-      alert(`已還原 ${new Date(saved.timestamp).toLocaleString()} 的存檔`);
-    }
+      // Try to determine store name from context if possible, or leave blank to prompt save next time
+      // We don't save storeName in AppState currently, but we could infer or just let user set it again.
   };
 
   const handleImportExclusion = async (file: File) => {
@@ -179,6 +194,12 @@ const App: React.FC = () => {
     try {
       const json = await readExcelFile(file);
       
+      // Try to auto-detect store name from filename
+      // e.g. "202310_Shalu.xlsx"
+      // We can look up available stores
+      // For now, reset currentStoreName
+      setCurrentStoreName('');
+
       // --- Extract Date Logic ---
       let extractedDate = '';
       if (json.length > 0) {
@@ -448,6 +469,21 @@ const App: React.FC = () => {
       return <HistoryDashboard onBack={() => setViewMode('CALCULATOR')} />;
   }
 
+  // Generate current state payload for saving
+  const getCurrentStatePayload = () => ({
+      exclusionList,
+      rewardRules,
+      rawSalesData,
+      processedData,
+      activePerson,
+      selectedPersons: Array.from(selectedPersons),
+      staffRoles,
+      repurchaseOptions,
+      staffMasterList,
+      reportDate,
+      timestamp: Date.now()
+  });
+
   return (
     <>
       <div className="flex flex-col h-screen bg-slate-100 font-sans text-slate-900">
@@ -470,8 +506,9 @@ const App: React.FC = () => {
                   </div>
                 </h1>
                 <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.2.0 (High Perf)</span>
-                    {lastSaveTime && <span className="flex items-center gap-1 border-l border-slate-700 pl-2"><Save size={10}/> {new Date(lastSaveTime).toLocaleTimeString()}</span>}
+                    <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded">v1.3.0</span>
+                    {/* Auto-save Indicator (Local) */}
+                    {lastSaveTime && <span className="flex items-center gap-1 border-l border-slate-700 pl-2 text-emerald-500/80"><Activity size={10}/> Auto-saved</span>}
                 </div>
              </div>
           </div>
@@ -485,14 +522,17 @@ const App: React.FC = () => {
              <button onClick={() => setShowStaffManager(true)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-blue-200 bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:text-white transition-colors font-medium rounded-sm">
                 <Users size={14}/> 員工職位設定
              </button>
-             <button onClick={handleManualSave} disabled={!rawSalesData.length || isProcessing} className="flex items-center gap-2 px-3 py-1.5 text-xs text-emerald-300 bg-slate-800 border border-emerald-800/50 hover:bg-slate-700 hover:text-emerald-200 transition-colors font-medium rounded-sm disabled:opacity-30">
-               <Save size={14}/> 儲存
+             
+             {/* SAVE BUTTON */}
+             <button onClick={handleOpenSaveModal} disabled={!rawSalesData.length || isProcessing} className="flex items-center gap-2 px-3 py-1.5 text-xs text-emerald-300 bg-slate-800 border border-emerald-800/50 hover:bg-slate-700 hover:text-emerald-200 transition-colors font-medium rounded-sm disabled:opacity-30">
+               <Save size={14}/> 儲存分店進度
              </button>
-             {hasSavedData && (
-                <button onClick={handleLoadSave} disabled={isProcessing} className="flex items-center gap-2 px-3 py-1.5 text-xs text-amber-300 bg-slate-800 border border-amber-800/50 hover:bg-slate-700 hover:text-amber-200 transition-colors font-medium rounded-sm disabled:opacity-30">
-                  <FolderOpen size={14} /> 讀取
-                </button>
-             )}
+             
+             {/* LOAD BUTTON */}
+             <button onClick={handleOpenLoadModal} disabled={isProcessing} className="flex items-center gap-2 px-3 py-1.5 text-xs text-amber-300 bg-slate-800 border border-amber-800/50 hover:bg-slate-700 hover:text-amber-200 transition-colors font-medium rounded-sm disabled:opacity-30">
+                <FolderOpen size={14} /> 讀取分店進度
+             </button>
+
              <button onClick={() => setShowExportSettings(true)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-300 bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:text-white transition-colors font-medium rounded-sm">
                <Settings size={14}/> 匯出設定
              </button>
@@ -567,6 +607,15 @@ const App: React.FC = () => {
       {showRepurchaseSettings && <RepurchaseSettingsModal options={repurchaseOptions} onSave={(opts) => { setRepurchaseOptions(opts); setShowRepurchaseSettings(false); }} onClose={() => setShowRepurchaseSettings(false)} />}
       {showStaffManager && <StaffManagerModal staffList={staffMasterList} onSave={(list) => { setStaffMasterList(list); setShowStaffManager(false); }} onClose={() => setShowStaffManager(false)} />}
       {showProductGroups && <ProductGroupModal onClose={() => setShowProductGroups(false)} />}
+      {sessionModal.isOpen && (
+          <SessionManagerModal 
+              mode={sessionModal.mode} 
+              currentState={getCurrentStatePayload()}
+              onLoad={handleRestoreSession}
+              onClose={() => setSessionModal(prev => ({ ...prev, isOpen: false }))}
+              currentStoreName={currentStoreName}
+          />
+      )}
     </>
   );
 };

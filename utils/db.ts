@@ -1,6 +1,7 @@
 
 import Dexie, { Table } from 'dexie';
 import { StoreRecord, ProductGroup, GroupItem } from '../types';
+import { AppState } from './storage'; // Import AppState interface
 
 export interface HistoryRecord {
   id?: number;
@@ -94,6 +95,14 @@ export interface TemplateRecord {
   updatedAt: number;
 }
 
+export interface SavedSession {
+  id?: number;
+  storeName: string;
+  timestamp: number;
+  note?: string;
+  data: AppState; // Stores the full application state
+}
+
 export const TEMPLATE_IDS = {
   SALES: 1,
   PHARMACIST: 2,
@@ -105,6 +114,7 @@ export const db = new Dexie('SalesHistoryDB') as Dexie & {
   templates: Table<TemplateRecord>;
   stores: Table<StoreRecord>;
   productGroups: Table<ProductGroup>;
+  savedSessions: Table<SavedSession>;
 };
 
 // --- PERSISTENCE REQUEST ---
@@ -120,12 +130,13 @@ if (navigator.storage && navigator.storage.persist) {
   });
 }
 
-// Update to version 8: Add ticketNo to index
-db.version(8).stores({
+// Update to version 9: Add savedSessions
+db.version(9).stores({
   history: '++id, [customerID+itemID], customerID, itemID, storeName, date, [storeName+date], ticketNo',
   templates: '++id, name, updatedAt',
   stores: '++id, &name',
-  productGroups: '++id, groupName'
+  productGroups: '++id, groupName',
+  savedSessions: '++id, &storeName, timestamp' // Indexed by storeName (unique) and timestamp
 });
 
 // --- Product Group Helpers ---
@@ -466,6 +477,40 @@ export const deleteProductGroup = async (id: number) => {
   await db.productGroups.delete(id);
   await refreshGroupCache();
 };
+
+// --- SESSION MANAGEMENT (Branch Specific Saves) ---
+
+export const saveSession = async (storeName: string, appState: AppState, note: string = '') => {
+    // Check if exists to determine insert or update (though put handles both if key matches)
+    // We want unique storeName for sessions.
+    
+    // We strip sensitive/large binary data or redundant cache if needed, but AppState is mostly JSON data.
+    // Ensure we are not saving the 'timestamp' from AppState as the session timestamp, but create a new one.
+    
+    const payload: SavedSession = {
+        storeName: storeName.trim(),
+        timestamp: Date.now(),
+        note: note,
+        data: appState
+    };
+
+    // Use put to overwrite based on storeName index if unique, but Dexie default index isn't unique unless defined.
+    // We defined `&storeName` in schema, so it is unique.
+    await db.savedSessions.put(payload);
+};
+
+export const getSavedSessions = async (): Promise<SavedSession[]> => {
+    return await db.savedSessions.toArray();
+};
+
+export const deleteSession = async (storeName: string) => {
+    await db.savedSessions.where('storeName').equals(storeName).delete();
+};
+
+export const loadSession = async (storeName: string): Promise<SavedSession | undefined> => {
+    return await db.savedSessions.get({ storeName });
+};
+
 
 // --- DATABASE BACKUP / RESTORE (OPTIMIZED FOR LARGE DATASETS) ---
 
