@@ -81,7 +81,7 @@ const DataViewer: React.FC<DataViewerProps> = ({
 
   useLayoutEffect(() => {
     if (historyState && historyRef.current) adjustPosition(historyRef.current, historyState.x, historyState.y);
-  }, [historyState]);
+  }, [historyState, historyState?.records.length, historyState?.loading]);
 
   useEffect(() => {
       setSortConfig({ key: null, direction: 'asc' });
@@ -92,25 +92,42 @@ const DataViewer: React.FC<DataViewerProps> = ({
         const currentWindow = el.ownerDocument.defaultView || window;
         const viewportWidth = currentWindow.innerWidth;
         const viewportHeight = currentWindow.innerHeight;
-        let newX = targetX;
-        let newY = targetY;
-        if (newX + width > viewportWidth) newX = newX - width - 20; 
-        if (newY + height > viewportHeight) newY = newY - height - 20; 
-        el.style.left = `${newX}px`;
-        el.style.top = `${newY}px`;
+        const margin = 12; // 安全距離
+        
+        let finalX = targetX + 10;
+        let finalY = targetY + 10;
+
+        // 1. 水平偵測與翻轉
+        if (finalX + width + margin > viewportWidth) {
+            // 右側放不下，翻轉到左側
+            finalX = targetX - width - 10;
+        }
+
+        // 2. 垂直偵測與翻轉
+        if (finalY + height + margin > viewportHeight) {
+            // 下方放不下，翻轉到上方
+            finalY = targetY - height - 10;
+        }
+
+        // 3. 強制防撞限制 (Clamping) - 確保座標絕對不會超出螢幕邊緣
+        finalX = Math.max(margin, Math.min(finalX, viewportWidth - width - margin));
+        finalY = Math.max(margin, Math.min(finalY, viewportHeight - height - margin));
+
+        el.style.left = `${finalX}px`;
+        el.style.top = `${finalY}px`;
   };
 
   const openPopover = (e: React.MouseEvent, rowId: string) => {
     e.stopPropagation();
     setHistoryState(null); 
-    setPopoverState({ rowId, x: e.clientX + 10, y: e.clientY + 10 });
+    setPopoverState({ rowId, x: e.clientX, y: e.clientY });
   };
 
   const openHistoryAndSelect = async (e: React.MouseEvent, customerID: string, itemID: string, rowId: string, mode: 'dev' | 'seller') => {
       e.stopPropagation();
       setPopoverState(null); 
       setHistoryState({ 
-          x: e.clientX + 10, y: e.clientY + 10, records: [], loading: true, 
+          x: e.clientX, y: e.clientY, records: [], loading: true, 
           targetRowId: rowId, targetCid: customerID, targetItemId: itemID, mode
       });
       try {
@@ -178,7 +195,6 @@ const DataViewer: React.FC<DataViewerProps> = ({
     return colors[Math.abs(hash) % colors.length];
   };
 
-  // New Helper: Get specialized color for item alias tags
   const getAliasColorClass = (alias: string) => {
     const colors = [
         'bg-indigo-100 text-indigo-700 border-indigo-200',
