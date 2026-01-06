@@ -658,9 +658,9 @@ const DataViewer: React.FC<DataViewerProps> = ({
                 <div ref={popoverRef} className="fixed z-[100] bg-white rounded-lg shadow-xl border border-slate-200 p-3 w-64 animate-in fade-in zoom-in-95 duration-100" style={{ left: popoverState.x, top: popoverState.y }}>
                     <div className="text-xs font-bold text-gray-500 mb-2 pb-1 border-b">選擇回購狀態</div>
                     <div className="space-y-3">
-                        {genOpts.length > 0 && <div className="grid grid-cols-3 gap-1">{genOpts.map(o => <button key={o.id} onClick={() => handlePopoverSelect(o.label)} className="text-[10px] px-1 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 border border-blue-100 truncate">{o.label}</button>)}</div>}
-                        {specOpts.length > 0 && <div className="grid grid-cols-2 gap-1">{specOpts.map(o => <button key={o.id} onClick={() => handlePopoverSelect(o.label)} className="text-[10px] px-1 py-1 bg-purple-50 text-purple-700 rounded hover:bg-purple-100 border border-purple-100 truncate">{o.label}</button>)}</div>}
-                        <button onClick={() => handlePopoverSelect('')} className="w-full mt-1 text-[10px] text-gray-400 hover:text-red-500 border border-transparent hover:border-red-100 rounded">清除狀態</button>
+                        {genOpts.length > 0 && <div className="grid grid-cols-3 gap-1">{genOpts.map(o => <button key={o.id} onClick={() => handlePopoverSelect(o.label)} className="text-[11px] px-1 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 border border-blue-100 truncate">{o.label}</button>)}</div>}
+                        {specOpts.length > 0 && <div className="grid grid-cols-2 gap-1">{specOpts.map(o => <button key={o.id} onClick={() => handlePopoverSelect(o.label)} className="text-[11px] px-1 py-1 bg-purple-50 text-purple-700 rounded hover:bg-purple-100 border border-purple-100 truncate">{o.label}</button>)}</div>}
+                        <button onClick={() => handlePopoverSelect('')} className="w-full mt-1 text-[11px] text-gray-400 hover:text-red-500 border border-transparent hover:border-red-100 rounded">清除狀態</button>
                     </div>
                 </div>, rootRef.current ? (rootRef.current.ownerDocument.body) : document.body
             )}
